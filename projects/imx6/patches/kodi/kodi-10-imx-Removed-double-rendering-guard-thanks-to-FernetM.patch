@@ -1,0 +1,43 @@
+From e99ee566ff2ac74c47a4bb025e800449a118275b Mon Sep 17 00:00:00 2001
+From: fritsch <Peter.Fruehberger@gmail.com>
+Date: Sat, 24 Jan 2015 17:56:10 +0100
+Subject: [PATCH] [imx] Removed double rendering guard thanks to FernetMentas
+ patch (by smallint)
+
+---
+ xbmc/cores/VideoRenderers/LinuxRendererGLES.cpp | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/xbmc/cores/VideoRenderers/LinuxRendererGLES.cpp b/xbmc/cores/VideoRenderers/LinuxRendererGLES.cpp
+index 74e950c..2d50869 100644
+--- a/xbmc/cores/VideoRenderers/LinuxRendererGLES.cpp
++++ b/xbmc/cores/VideoRenderers/LinuxRendererGLES.cpp
+@@ -624,7 +624,6 @@ void CLinuxRendererGLES::RenderUpdateVideo(bool clear, DWORD flags, DWORD alpha)
+       g_IMXContext.SetBlitRects(m_sourceRect, m_destRect);
+ 
+       bool topFieldFirst = true;
+-      bool done = true;
+ 
+       // Deinterlacing requested
+       if (flags & RENDER_FLAG_FIELDMASK)
+@@ -636,7 +635,6 @@ void CLinuxRendererGLES::RenderUpdateVideo(bool clear, DWORD flags, DWORD alpha)
+           g_IMXContext.SetDeInterlacing(true);
+           g_IMXContext.SetDoubleRate(true);
+           g_IMXContext.SetInterpolatedFrame(true);
+-          done = false;
+         }
+         else if (flags & RENDER_FLAG_FIELD1)
+         {
+@@ -670,9 +668,6 @@ void CLinuxRendererGLES::RenderUpdateVideo(bool clear, DWORD flags, DWORD alpha)
+       g_IMXContext.BlitAsync(NULL, buffer, topFieldFirst);
+ #endif
+ 
+-      // Prevent rendering again
+-      if (done)
+-        SAFE_RELEASE(m_buffers[m_iYV12RenderBuffer].IMXBuffer);
+     }
+   }
+ #endif
+-- 
+1.9.1
+
