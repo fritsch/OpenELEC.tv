@@ -17,12 +17,12 @@
 ################################################################################
 
 PKG_NAME="kodi-pvr-addons"
-PKG_VERSION="a0a437e"
+PKG_VERSION="636cde6"
 PKG_REV="1"
 PKG_ARCH="any"
 PKG_LICENSE="GPL"
 PKG_SITE="https://github.com/opdenkamp/xbmc-pvr-addons"
-PKG_URL="$DISTRO_SRC/$PKG_NAME-$PKG_VERSION.tar.xz"
+PKG_URL="http://saraev.ca/openelec/$PKG_NAME-$PKG_VERSION.tar.xz"
 PKG_DEPENDS_TARGET="toolchain curl kodi"
 PKG_PRIORITY="optional"
 PKG_SECTION="mediacenter"
@@ -39,6 +39,12 @@ else
 fi
 
 PKG_CONFIGURE_OPTS_TARGET="--enable-addons-with-dependencies $PVRADDONS_MYSQL"
+
+pre_configure_target() {
+# kodi-pvr-addons fails to build in subdirs
+  cd $ROOT/$PKG_BUILD
+    rm -rf .$TARGET_NAME
+}
 
 post_makeinstall_target() {
   if [ "$DEBUG" != yes ]; then
