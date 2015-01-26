@@ -1,0 +1,41 @@
+From 4239bdfb687a0ce889ba76d9895ebfa20f69500a Mon Sep 17 00:00:00 2001
+From: Sam Stenvall <neggelandia@gmail.com>
+Date: Thu, 29 Jan 2015 09:59:17 +0200
+Subject: [PATCH] [pvr] don't consider a channel as "changed" if the client's
+ channel name has changed. Since we don't store that field in the database,
+ without this all channels will appear changed when they're first loaded from
+ the database
+
+---
+ xbmc/pvr/channels/PVRChannel.cpp | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/xbmc/pvr/channels/PVRChannel.cpp b/xbmc/pvr/channels/PVRChannel.cpp
+index 2e60f9b..025e0a3 100644
+--- a/xbmc/pvr/channels/PVRChannel.cpp
++++ b/xbmc/pvr/channels/PVRChannel.cpp
+@@ -218,20 +218,21 @@ bool CPVRChannel::UpdateFromClient(const CPVRChannel &channel)
+   if (m_iClientChannelNumber.channel    != channel.ClientChannelNumber() ||
+       m_iClientChannelNumber.subchannel != channel.ClientSubChannelNumber() ||
+       m_strInputFormat                  != channel.InputFormat() ||
+-      m_iClientEncryptionSystem         != channel.EncryptionSystem() ||
+-      m_strClientChannelName            != channel.ClientChannelName())
++      m_iClientEncryptionSystem         != channel.EncryptionSystem())
+   {
+     m_iClientChannelNumber.channel    = channel.ClientChannelNumber();
+     m_iClientChannelNumber.subchannel = channel.ClientSubChannelNumber();
+     m_strInputFormat                  = channel.InputFormat();
+     m_iClientEncryptionSystem         = channel.EncryptionSystem();
+-    m_strClientChannelName            = channel.ClientChannelName();
+ 
+     UpdateEncryptionName();
+     m_bChanged = true;
+     SetChanged();
+   }
+ 
++  // always store the client channel name
++  m_strClientChannelName = channel.ClientChannelName();
++
+   // only update the channel name and icon if the user hasn't changed them manually
+   if (m_strChannelName.empty() || !IsUserSetName())
+     SetChannelName(channel.ClientChannelName());

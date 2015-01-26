@@ -1,0 +1,1204 @@
+From cd977942255888117539268564ec78523000a591 Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Wed, 16 Apr 2014 22:02:01 +0300
+Subject: [PATCH 01/16] Fix ALSA sound output for Amlogic-based devices.
+
+---
+ xbmc/cores/AudioEngine/Sinks/AESinkALSA.cpp | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/xbmc/cores/AudioEngine/Sinks/AESinkALSA.cpp b/xbmc/cores/AudioEngine/Sinks/AESinkALSA.cpp
+index df50940..9f80c06 100644
+--- a/xbmc/cores/AudioEngine/Sinks/AESinkALSA.cpp
++++ b/xbmc/cores/AudioEngine/Sinks/AESinkALSA.cpp
+@@ -83,6 +83,17 @@ static unsigned int ALSASampleRateList[] =
+   0
+ };
+ 
++static int CheckNP2(unsigned x)
++{
++    --x;
++    x |= x >> 1;
++    x |= x >> 2;
++    x |= x >> 4;
++    x |= x >> 8;
++    x |= x >> 16;
++    return ++x;
++}
++
+ CAESinkALSA::CAESinkALSA() :
+   m_bufferSize(0),
+   m_formatSampleRateMul(0.0),
+@@ -741,12 +752,20 @@ bool CAESinkALSA::InitializeHW(const ALSAConfig &inconfig, ALSAConfig &outconfig
+   */
+   periodSize  = std::min(periodSize, (snd_pcm_uframes_t) sampleRate / 20);
+   bufferSize  = std::min(bufferSize, (snd_pcm_uframes_t) sampleRate / 5);
++#if defined(HAS_LIBAMCODEC)
++  // must be pot for pivos.
++  bufferSize  = CheckNP2(bufferSize);
++#endif
+   
+   /* 
+    According to upstream we should set buffer size first - so make sure it is always at least
+    4x period size to not get underruns (some systems seem to have issues with only 2 periods)
+   */
+   periodSize = std::min(periodSize, bufferSize / 4);
++#if defined(HAS_LIBAMCODEC)
++  // must be pot for pivos.
++  periodSize = CheckNP2(periodSize);
++#endif
+ 
+   CLog::Log(LOGDEBUG, "CAESinkALSA::InitializeHW - Request: periodSize %lu, bufferSize %lu", periodSize, bufferSize);
+ 
+-- 
+2.1.0
+
+
+From 9a05d9763c4907ee8ed0156d77946370dd888eba Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Wed, 16 Apr 2014 22:11:51 +0300
+Subject: [PATCH 02/16] Allow audio passthrough for Amlogic-based devices.
+
+---
+ xbmc/cores/AudioEngine/Engines/ActiveAE/ActiveAESink.cpp | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/xbmc/cores/AudioEngine/Engines/ActiveAE/ActiveAESink.cpp b/xbmc/cores/AudioEngine/Engines/ActiveAE/ActiveAESink.cpp
+index b391ff3..a7565f0 100644
+--- a/xbmc/cores/AudioEngine/Engines/ActiveAE/ActiveAESink.cpp
++++ b/xbmc/cores/AudioEngine/Engines/ActiveAE/ActiveAESink.cpp
+@@ -91,6 +91,7 @@ AEDeviceType CActiveAESink::GetDeviceType(const std::string &device)
+ 
+ bool CActiveAESink::HasPassthroughDevice()
+ {
++#ifndef HAS_LIBAMCODEC
+   for (AESinkInfoList::iterator itt = m_sinkInfoList.begin(); itt != m_sinkInfoList.end(); ++itt)
+   {
+     for (AEDeviceInfoList::iterator itt2 = itt->m_deviceInfoList.begin(); itt2 != itt->m_deviceInfoList.end(); ++itt2)
+@@ -101,10 +102,14 @@ bool CActiveAESink::HasPassthroughDevice()
+     }
+   }
+   return false;
++#else
++  return true;
++#endif
+ }
+ 
+ bool CActiveAESink::SupportsFormat(const std::string &device, AEDataFormat format, int samplerate)
+ {
++#ifndef HAS_LIBAMCODEC
+   std::string dev = device;
+   std::string dri;
+   CAESinkFactory::ParseDevice(dev, dri);
+@@ -135,6 +140,9 @@ bool CActiveAESink::SupportsFormat(const std::string &device, AEDataFormat forma
+     }
+   }
+   return false;
++#else
++  return true;
++#endif
+ }
+ 
+ enum SINK_STATES
+-- 
+2.1.0
+
+
+From f26fe8da2a61156beadce95caf6e56084205f252 Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Wed, 16 Apr 2014 23:08:58 +0300
+Subject: [PATCH 03/16] Enable true 1920x1080 output without upscaling on
+ Amlogic-based devices.
+
+---
+ xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp | 44 +++++++++++++++++++++++++++--
+ xbmc/windowing/egl/EGLNativeTypeAmlogic.h   |  3 ++
+ 2 files changed, 44 insertions(+), 3 deletions(-)
+
+diff --git a/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp b/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp
+index f2073cb..3c7a8e6 100644
+--- a/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp
++++ b/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp
+@@ -88,9 +88,12 @@ bool CEGLNativeTypeAmlogic::CreateNativeWindow()
+   if (!nativeWindow)
+     return false;
+ 
+-  nativeWindow->width = 1280;
+-  nativeWindow->height = 720;
++  nativeWindow->width = 1920;
++  nativeWindow->height = 1080;
+   m_nativeWindow = nativeWindow;
++
++  SetFramebufferResolution(nativeWindow->width, nativeWindow->height);
++
+   return true;
+ #else
+   return false;
+@@ -135,6 +138,12 @@ bool CEGLNativeTypeAmlogic::GetNativeResolution(RESOLUTION_INFO *res) const
+ 
+ bool CEGLNativeTypeAmlogic::SetNativeResolution(const RESOLUTION_INFO &res)
+ {
++  if (m_nativeWindow)
++  {
++    ((fbdev_window *)m_nativeWindow)->width = res.iScreenWidth;
++    ((fbdev_window *)m_nativeWindow)->height = res.iScreenHeight;
++  }
++
+   switch((int)(0.5 + res.fRefreshRate))
+   {
+     default:
+@@ -220,7 +229,10 @@ bool CEGLNativeTypeAmlogic::SetDisplayResolution(const char *resolution)
+   std::string mode = resolution;
+   // switch display resolution
+   SysfsUtils::SetString("/sys/class/display/mode", mode.c_str());
+-  SetupVideoScaling(mode.c_str());
++
++  RESOLUTION_INFO res;
++  aml_mode_to_resolution(mode.c_str(), &res);
++  SetFramebufferResolution(res);
+ 
+   return true;
+ }
+@@ -305,3 +317,29 @@ void CEGLNativeTypeAmlogic::DisableFreeScale()
+     close(fd0);
+   }
+ }
++
++void CEGLNativeTypeAmlogic::SetFramebufferResolution(const RESOLUTION_INFO &res) const
++{
++  SetFramebufferResolution(res.iScreenWidth, res.iScreenHeight);
++}
++
++void CEGLNativeTypeAmlogic::SetFramebufferResolution(int width, int height) const
++{
++  int fd0;
++  std::string framebuffer = "/dev/" + m_framebuffer_name;
++
++  if ((fd0 = open(framebuffer.c_str(), O_RDWR)) >= 0)
++  {
++    struct fb_var_screeninfo vinfo;
++    if (ioctl(fd0, FBIOGET_VSCREENINFO, &vinfo) == 0)
++    {
++      vinfo.xres = width;
++      vinfo.yres = height;
++      vinfo.xres_virtual = 1920;
++      vinfo.yres_virtual = 2160;
++      vinfo.bits_per_pixel = 32;
++      ioctl(fd0, FBIOPUT_VSCREENINFO, &vinfo);
++    }
++    close(fd0);
++  }
++}
+diff --git a/xbmc/windowing/egl/EGLNativeTypeAmlogic.h b/xbmc/windowing/egl/EGLNativeTypeAmlogic.h
+index cc34ff7..781a153 100644
+--- a/xbmc/windowing/egl/EGLNativeTypeAmlogic.h
++++ b/xbmc/windowing/egl/EGLNativeTypeAmlogic.h
+@@ -54,5 +54,8 @@ protected:
+   void DisableFreeScale();
+ 
+ private:
++  void SetFramebufferResolution(const RESOLUTION_INFO &res) const;
++  void SetFramebufferResolution(int width, int height) const;
++
+   std::string m_framebuffer_name;
+ };
+-- 
+2.1.0
+
+
+From 07e7316dcf8ea3233bd9ea59d417ca9fcb2142d0 Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Tue, 22 Jul 2014 12:18:29 +0300
+Subject: [PATCH 04/16] Add support for retrieval of CPU temperature on Amlogic
+
+---
+ xbmc/utils/CPUInfo.cpp | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/xbmc/utils/CPUInfo.cpp b/xbmc/utils/CPUInfo.cpp
+index 95ddad9..186256f 100644
+--- a/xbmc/utils/CPUInfo.cpp
++++ b/xbmc/utils/CPUInfo.cpp
+@@ -18,6 +18,7 @@
+  *
+  */
+ 
++#include "system.h"
+ #include "CPUInfo.h"
+ #include "Temperature.h"
+ #include <string>
+@@ -95,6 +96,10 @@
+ #include "settings/AdvancedSettings.h"
+ #include "utils/StringUtils.h"
+ 
++#ifdef HAS_LIBAMCODEC
++#include "utils/AMLUtils.h"
++#endif
++
+ using namespace std;
+ 
+ // In milliseconds
+@@ -265,6 +270,10 @@ CCPUInfo::CCPUInfo(void)
+     m_fProcTemperature = fopen("/sys/class/hwmon/hwmon0/temp1_input", "r");
+   if (m_fProcTemperature == NULL)   
+     m_fProcTemperature = fopen("/sys/class/thermal/thermal_zone0/temp", "r");  // On Raspberry PIs
++#ifdef HAS_LIBAMCODEC
++  if (m_fProcTemperature == NULL)
++    m_fProcTemperature = fopen("/sys/class/saradc/temperature", "r");
++#endif
+ 
+   m_fCPUFreq = fopen ("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", "r");
+   if (!m_fCPUFreq)
+@@ -607,7 +616,10 @@ bool CCPUInfo::getTemperature(CTemperature& temperature)
+     if (!ret)
+     {
+       ret = fscanf(m_fProcTemperature, "%d", &value);
+-      value = value / 1000;
++#ifndef HAS_LIBAMCODEC
++      if (!aml_present())
++        value = value / 1000;
++#endif
+       scale = 'c';
+       ret++;
+     }
+-- 
+2.1.0
+
+
+From 9685610d9f62e5a9f642b9c4775eb0afe5857c3f Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Wed, 23 Jul 2014 22:23:34 +0300
+Subject: [PATCH 05/16] Add support for AV (CVBS) video output on Amlogic
+
+---
+ xbmc/utils/AMLUtils.cpp                     | 18 +++++++++++++
+ xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp | 40 +++++++++++++++++++++++++----
+ xbmc/windowing/egl/EGLNativeTypeAmlogic.h   |  1 +
+ 3 files changed, 54 insertions(+), 5 deletions(-)
+
+diff --git a/xbmc/utils/AMLUtils.cpp b/xbmc/utils/AMLUtils.cpp
+index 2c91094..291b09d 100644
+--- a/xbmc/utils/AMLUtils.cpp
++++ b/xbmc/utils/AMLUtils.cpp
+@@ -291,6 +291,24 @@ bool aml_mode_to_resolution(const char *mode, RESOLUTION_INFO *res)
+     res->fRefreshRate = 60;
+     res->dwFlags = D3DPRESENTFLAG_PROGRESSIVE;
+   }
++  else if (StringUtils::EqualsNoCase(fromMode, "480cvbs"))
++  {
++    res->iWidth = 720;
++    res->iHeight= 480;
++    res->iScreenWidth = 720;
++    res->iScreenHeight= 480;
++    res->fRefreshRate = 60;
++    res->dwFlags = D3DPRESENTFLAG_INTERLACED;
++  }
++  else if (StringUtils::EqualsNoCase(fromMode, "576cvbs"))
++  {
++    res->iWidth = 720;
++    res->iHeight= 576;
++    res->iScreenWidth = 720;
++    res->iScreenHeight= 576;
++    res->fRefreshRate = 50;
++    res->dwFlags = D3DPRESENTFLAG_INTERLACED;
++  }
+   else if (StringUtils::EqualsNoCase(fromMode, "720p"))
+   {
+     res->iWidth = 1280;
+diff --git a/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp b/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp
+index 3c7a8e6..c9a3bd8 100644
+--- a/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp
++++ b/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp
+@@ -160,6 +160,10 @@ bool CEGLNativeTypeAmlogic::SetNativeResolution(const RESOLUTION_INFO &res)
+           else
+             SetDisplayResolution("1080p");
+           break;
++        case 720:
++          if (!IsHdmiConnected())
++            SetDisplayResolution("480cvbs");
++          break;
+       }
+       break;
+     case 50:
+@@ -175,6 +179,10 @@ bool CEGLNativeTypeAmlogic::SetNativeResolution(const RESOLUTION_INFO &res)
+           else
+             SetDisplayResolution("1080p50hz");
+           break;
++        case 720:
++          if (!IsHdmiConnected())
++            SetDisplayResolution("576cvbs");
++          break;
+       }
+       break;
+     case 30:
+@@ -190,9 +198,18 @@ bool CEGLNativeTypeAmlogic::SetNativeResolution(const RESOLUTION_INFO &res)
+ 
+ bool CEGLNativeTypeAmlogic::ProbeResolutions(std::vector<RESOLUTION_INFO> &resolutions)
+ {
+-  std::string valstr;
+-  SysfsUtils::GetString("/sys/class/amhdmitx/amhdmitx0/disp_cap", valstr);
+-  std::vector<std::string> probe_str = StringUtils::Split(valstr, "\n");
++  std::vector<std::string> probe_str;
++  if (IsHdmiConnected())
++  {
++    std::string valstr;
++    SysfsUtils::GetString("/sys/class/amhdmitx/amhdmitx0/disp_cap", valstr);
++    probe_str = StringUtils::Split(valstr, "\n");
++  }
++  else
++  {
++    probe_str.push_back("480cvbs");
++    probe_str.push_back("576cvbs");
++  }
+ 
+   resolutions.clear();
+   RESOLUTION_INFO res;
+@@ -210,8 +227,11 @@ bool CEGLNativeTypeAmlogic::GetPreferredResolution(RESOLUTION_INFO *res) const
+   // check display/mode, it gets defaulted at boot
+   if (!GetNativeResolution(res))
+   {
+-    // punt to 720p if we get nothing
+-    aml_mode_to_resolution("720p", res);
++    // punt to 720p or 576cvbs if we get nothing
++    if (IsHdmiConnected())
++      aml_mode_to_resolution("720p", res);
++    else
++      aml_mode_to_resolution("576cvbs", res);
+   }
+ 
+   return true;
+@@ -343,3 +363,13 @@ void CEGLNativeTypeAmlogic::SetFramebufferResolution(int width, int height) cons
+     close(fd0);
+   }
+ }
++
++bool CEGLNativeTypeAmlogic::IsHdmiConnected() const
++{
++  std::string hpd_state;
++  SysfsUtils::GetString("/sys/class/amhdmitx/amhdmitx0/hpd_state", hpd_state);
++  StringUtils::Trim(hpd_state);
++  if (hpd_state == "1")
++    return true;
++  return false;
++}
+diff --git a/xbmc/windowing/egl/EGLNativeTypeAmlogic.h b/xbmc/windowing/egl/EGLNativeTypeAmlogic.h
+index 781a153..8042f36 100644
+--- a/xbmc/windowing/egl/EGLNativeTypeAmlogic.h
++++ b/xbmc/windowing/egl/EGLNativeTypeAmlogic.h
+@@ -56,6 +56,7 @@ protected:
+ private:
+   void SetFramebufferResolution(const RESOLUTION_INFO &res) const;
+   void SetFramebufferResolution(int width, int height) const;
++  bool IsHdmiConnected() const;
+ 
+   std::string m_framebuffer_name;
+ };
+-- 
+2.1.0
+
+
+From 79fce22dbcde4e01aca64d03247282adfc453e6f Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Tue, 29 Jul 2014 10:31:07 +0300
+Subject: [PATCH 06/16] Fix the issue when the video display is disabled after
+ a resolution change
+
+---
+ xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp | 55 +----------------------------
+ xbmc/windowing/egl/EGLNativeTypeAmlogic.h   |  1 -
+ 2 files changed, 1 insertion(+), 55 deletions(-)
+
+diff --git a/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp b/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp
+index c9a3bd8..6b38889 100644
+--- a/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp
++++ b/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp
+@@ -66,7 +66,7 @@ void CEGLNativeTypeAmlogic::Initialize()
+   aml_permissions();
+   aml_cpufreq_min(true);
+   aml_cpufreq_max(true);
+-  return;
++  DisableFreeScale();
+ }
+ void CEGLNativeTypeAmlogic::Destroy()
+ {
+@@ -278,64 +278,11 @@ void CEGLNativeTypeAmlogic::SetupVideoScaling(const char *mode)
+   SysfsUtils::SetInt("/sys/class/graphics/fb0/blank", 0);
+ }
+ 
+-void CEGLNativeTypeAmlogic::EnableFreeScale()
+-{
+-  // enable OSD free scale using frame buffer size of 720p
+-  SysfsUtils::SetInt("/sys/class/graphics/fb0/free_scale", 0);
+-  SysfsUtils::SetInt("/sys/class/graphics/fb1/free_scale", 0);
+-  SysfsUtils::SetInt("/sys/class/graphics/fb0/scale_width",  1280);
+-  SysfsUtils::SetInt("/sys/class/graphics/fb0/scale_height", 720);
+-  SysfsUtils::SetInt("/sys/class/graphics/fb1/scale_width",  1280);
+-  SysfsUtils::SetInt("/sys/class/graphics/fb1/scale_height", 720);
+-
+-  // enable video free scale (scaling to 1920x1080 with frame buffer size 1280x720)
+-  SysfsUtils::SetInt("/sys/class/ppmgr/ppscaler", 0);
+-  SysfsUtils::SetInt("/sys/class/video/disable_video", 1);
+-  SysfsUtils::SetInt("/sys/class/ppmgr/ppscaler", 1);
+-  SysfsUtils::SetString("/sys/class/ppmgr/ppscaler_rect", "0 0 1919 1079 0");
+-  SysfsUtils::SetString("/sys/class/ppmgr/disp", "1280 720");
+-  //
+-  SysfsUtils::SetInt("/sys/class/graphics/fb0/scale_width",  1280);
+-  SysfsUtils::SetInt("/sys/class/graphics/fb0/scale_height", 720);
+-  SysfsUtils::SetInt("/sys/class/graphics/fb1/scale_width",  1280);
+-  SysfsUtils::SetInt("/sys/class/graphics/fb1/scale_height", 720);
+-  //
+-  SysfsUtils::SetInt("/sys/class/video/disable_video", 2);
+-  SysfsUtils::SetString("/sys/class/display/axis", "0 0 1279 719 0 0 0 0");
+-  SysfsUtils::SetString("/sys/class/ppmgr/ppscaler_rect", "0 0 1279 719 1");
+-  //
+-  SysfsUtils::SetInt("/sys/class/graphics/fb0/free_scale", 1);
+-  SysfsUtils::SetInt("/sys/class/graphics/fb1/free_scale", 1);
+-  SysfsUtils::SetString("/sys/class/graphics/fb0/free_scale_axis", "0 0 1279 719");
+-}
+-
+ void CEGLNativeTypeAmlogic::DisableFreeScale()
+ {
+   // turn off frame buffer freescale
+   SysfsUtils::SetInt("/sys/class/graphics/fb0/free_scale", 0);
+   SysfsUtils::SetInt("/sys/class/graphics/fb1/free_scale", 0);
+-  SysfsUtils::SetString("/sys/class/graphics/fb0/free_scale_axis", "0 0 1279 719");
+-
+-  SysfsUtils::SetInt("/sys/class/ppmgr/ppscaler", 0);
+-  SysfsUtils::SetInt("/sys/class/video/disable_video", 0);
+-  // now default video display to off
+-  SysfsUtils::SetInt("/sys/class/video/disable_video", 1);
+-
+-  // revert display axis
+-  int fd0;
+-  std::string framebuffer = "/dev/" + m_framebuffer_name;
+-
+-  if ((fd0 = open(framebuffer.c_str(), O_RDWR)) >= 0)
+-  {
+-    struct fb_var_screeninfo vinfo;
+-    if (ioctl(fd0, FBIOGET_VSCREENINFO, &vinfo) == 0)
+-    {
+-      char daxis_str[256] = {0};
+-      sprintf(daxis_str, "%d %d %d %d 0 0 0 0", 0, 0, vinfo.xres-1, vinfo.yres-1);
+-      SysfsUtils::SetString("/sys/class/display/axis", daxis_str);
+-    }
+-    close(fd0);
+-  }
+ }
+ 
+ void CEGLNativeTypeAmlogic::SetFramebufferResolution(const RESOLUTION_INFO &res) const
+diff --git a/xbmc/windowing/egl/EGLNativeTypeAmlogic.h b/xbmc/windowing/egl/EGLNativeTypeAmlogic.h
+index 8042f36..2e52b7e 100644
+--- a/xbmc/windowing/egl/EGLNativeTypeAmlogic.h
++++ b/xbmc/windowing/egl/EGLNativeTypeAmlogic.h
+@@ -50,7 +50,6 @@ public:
+ protected:
+   bool SetDisplayResolution(const char *resolution);
+   void SetupVideoScaling(const char *mode);
+-  void EnableFreeScale();
+   void DisableFreeScale();
+ 
+ private:
+-- 
+2.1.0
+
+
+From 6a3a067c72e8aff033aa8dc63f75f2e974e3aa2e Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Thu, 4 Sep 2014 00:28:23 +0300
+Subject: [PATCH 07/16] Update all virtual consoles when changing framebuffer
+ geometry after a resolution change
+
+That helps to resolve the issue when framebuffer size is not always correctly change according to the resolution set.
+It seems that the issue appeared after updating to the U-Boot bootloader released 2014-08-24 by Amlogic.
+---
+ xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp b/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp
+index 6b38889..dfa357c 100644
+--- a/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp
++++ b/xbmc/windowing/egl/EGLNativeTypeAmlogic.cpp
+@@ -305,6 +305,7 @@ void CEGLNativeTypeAmlogic::SetFramebufferResolution(int width, int height) cons
+       vinfo.xres_virtual = 1920;
+       vinfo.yres_virtual = 2160;
+       vinfo.bits_per_pixel = 32;
++      vinfo.activate = FB_ACTIVATE_ALL;
+       ioctl(fd0, FBIOPUT_VSCREENINFO, &vinfo);
+     }
+     close(fd0);
+-- 
+2.1.0
+
+
+From ca7ed5e25be16f2999b351c106da52005300452d Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Mon, 8 Sep 2014 23:29:40 +0300
+Subject: [PATCH 08/16] Reorder libraries in configure script to prevent linker
+ errors when linking with libsmbclient
+
+Place libsmbclient before all other libraries to prevent linker errors when linking
+with libsmbclient if the libc that is currently used doesn't contain some functions
+such as dn_expand (which are often included in libc), but are actually included in
+libresolv.
+---
+ configure.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/configure.in b/configure.in
+index 24bb77b..8eee88b 100644
+--- a/configure.in
++++ b/configure.in
+@@ -1480,7 +1480,7 @@ fi
+ # samba
+ if test "x$use_samba" != "xno"; then
+   PKG_CHECK_MODULES([SAMBA], [smbclient],
+-    [INCLUDES="$INCLUDES $SAMBA_CFLAGS"; LIBS="$LIBS $SAMBA_LIBS"],
++    [INCLUDES="$INCLUDES $SAMBA_CFLAGS"; LIBS="$SAMBA_LIBS $LIBS"],
+     [AC_CHECK_LIB([smbclient], [main],,
+       use_samba=no;AC_MSG_ERROR($missing_library))
+       USE_LIBSMBCLIENT=0
+-- 
+2.1.0
+
+
+From 9b07a787d9c5f85846267daf41849a992606d976 Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Fri, 19 Sep 2014 01:55:12 +0300
+Subject: [PATCH 09/16] Change the sample rates that are supported by ALSA but
+ unsupported by HDMI to the closest supported value
+
+---
+ xbmc/cores/AudioEngine/Sinks/AESinkALSA.cpp | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/xbmc/cores/AudioEngine/Sinks/AESinkALSA.cpp b/xbmc/cores/AudioEngine/Sinks/AESinkALSA.cpp
+index 9f80c06..18303f8 100644
+--- a/xbmc/cores/AudioEngine/Sinks/AESinkALSA.cpp
++++ b/xbmc/cores/AudioEngine/Sinks/AESinkALSA.cpp
+@@ -666,6 +666,26 @@ bool CAESinkALSA::InitializeHW(const ALSAConfig &inconfig, ALSAConfig &outconfig
+   snd_pcm_hw_params_set_access(m_pcm, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
+ 
+   unsigned int sampleRate   = inconfig.sampleRate;
++#ifdef HAS_LIBAMCODEC
++  // Change the sample rates that are supported by ALSA but unsupported by HDMI to the closest supported value
++  switch (sampleRate)
++  {
++  case 5512:
++  case 8000:
++  case 11025:
++  case 16000:
++  case 22050:
++    sampleRate = 44100;
++    break;
++  case 64000:
++    sampleRate = 88200;
++    break;
++  case 384000:
++    sampleRate = 192000;
++    break;
++  }
++#endif
++
+   snd_pcm_hw_params_set_rate_near    (m_pcm, hw_params, &sampleRate, NULL);
+ 
+   unsigned int channelCount = inconfig.channels;
+-- 
+2.1.0
+
+
+From 881c0aaeacdc9a09bf9e85ebfde7a2bf7d33e4ab Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Sat, 20 Sep 2014 04:43:52 +0300
+Subject: [PATCH 10/16] Fill audio packets completely when resampling to
+ prevent 'audio data unaligned' kernel warnings
+
+---
+ xbmc/cores/AudioEngine/Engines/ActiveAE/ActiveAEBuffer.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/xbmc/cores/AudioEngine/Engines/ActiveAE/ActiveAEBuffer.cpp b/xbmc/cores/AudioEngine/Engines/ActiveAE/ActiveAEBuffer.cpp
+index 3b0a015..ef431a4 100644
+--- a/xbmc/cores/AudioEngine/Engines/ActiveAE/ActiveAEBuffer.cpp
++++ b/xbmc/cores/AudioEngine/Engines/ActiveAE/ActiveAEBuffer.cpp
+@@ -143,7 +143,11 @@ CActiveAEBufferPoolResample::CActiveAEBufferPoolResample(AEAudioFormat inputForm
+   if (AE_IS_RAW(m_inputFormat.m_dataFormat))
+     m_inputFormat.m_dataFormat = AE_FMT_S16NE;
+   m_resampler = NULL;
++#ifdef HAS_LIBAMCODEC
++  m_fillPackets = true;
++#else
+   m_fillPackets = false;
++#endif
+   m_drain = false;
+   m_empty = true;
+   m_procSample = NULL;
+-- 
+2.1.0
+
+
+From 297ac8ca11f4b6d20286bd161e20afd3d36ea651 Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Sun, 21 Sep 2014 17:17:14 +0300
+Subject: [PATCH 11/16] Use fpsrate and fpsscale instead of rfpsrate and
+ rfpsscale to detect framerate
+
+---
+ xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp  | 12 ++-----
+ .../DVDCodecs/Video/DVDVideoCodecAmlogic.cpp       | 38 ++++++++++------------
+ 2 files changed, 20 insertions(+), 30 deletions(-)
+
+diff --git a/xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp b/xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp
+index d7c7ad8..78a3e69 100644
+--- a/xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp
++++ b/xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp
+@@ -1498,14 +1498,8 @@ bool CAMLCodec::OpenDecoder(CDVDStreamInfo &hints)
+   am_private->video_ratio64    = ((int64_t)video_ratio.num << 32) | video_ratio.den;
+ 
+   // handle video rate
+-  if (hints.rfpsrate > 0 && hints.rfpsscale != 0)
++  if (hints.fpsrate > 0 && hints.fpsscale != 0)
+   {
+-    // check ffmpeg r_frame_rate 1st
+-    am_private->video_rate = 0.5 + (float)UNIT_FREQ * hints.rfpsscale / hints.rfpsrate;
+-  }
+-  else if (hints.fpsrate > 0 && hints.fpsscale != 0)
+-  {
+-    // then ffmpeg avg_frame_rate next
+     am_private->video_rate = 0.5 + (float)UNIT_FREQ * hints.fpsscale / hints.fpsrate;
+   }
+ 
+@@ -1578,8 +1572,8 @@ bool CAMLCodec::OpenDecoder(CDVDStreamInfo &hints)
+   CLog::Log(LOGDEBUG, "CAMLCodec::OpenDecoder "
+     "hints.width(%d), hints.height(%d), hints.codec(%d), hints.codec_tag(%d), hints.pid(%d)",
+     hints.width, hints.height, hints.codec, hints.codec_tag, hints.pid);
+-  CLog::Log(LOGDEBUG, "CAMLCodec::OpenDecoder hints.fpsrate(%d), hints.fpsscale(%d), hints.rfpsrate(%d), hints.rfpsscale(%d), video_rate(%d)",
+-    hints.fpsrate, hints.fpsscale, hints.rfpsrate, hints.rfpsscale, am_private->video_rate);
++  CLog::Log(LOGDEBUG, "CAMLCodec::OpenDecoder hints.fpsrate(%d), hints.fpsscale(%d), video_rate(%d)",
++    hints.fpsrate, hints.fpsscale, am_private->video_rate);
+   CLog::Log(LOGDEBUG, "CAMLCodec::OpenDecoder hints.aspect(%f), video_ratio.num(%d), video_ratio.den(%d)",
+     hints.aspect, video_ratio.num, video_ratio.den);
+   CLog::Log(LOGDEBUG, "CAMLCodec::OpenDecoder hints.orientation(%d), hints.forced_aspect(%d), hints.extrasize(%d)",
+diff --git a/xbmc/cores/dvdplayer/DVDCodecs/Video/DVDVideoCodecAmlogic.cpp b/xbmc/cores/dvdplayer/DVDCodecs/Video/DVDVideoCodecAmlogic.cpp
+index 4f3758f..21c7869 100644
+--- a/xbmc/cores/dvdplayer/DVDCodecs/Video/DVDVideoCodecAmlogic.cpp
++++ b/xbmc/cores/dvdplayer/DVDCodecs/Video/DVDVideoCodecAmlogic.cpp
+@@ -75,9 +75,7 @@ bool CDVDVideoCodecAmlogic::Open(CDVDStreamInfo &hints, CDVDCodecOptions &option
+       m_mpeg2_sequence->width  = m_hints.width;
+       m_mpeg2_sequence->height = m_hints.height;
+       m_mpeg2_sequence->ratio  = m_hints.aspect;
+-      if (m_hints.rfpsrate > 0 && m_hints.rfpsscale != 0)
+-        m_mpeg2_sequence->rate = (float)m_hints.rfpsrate / m_hints.rfpsscale;
+-      else if (m_hints.fpsrate > 0 && m_hints.fpsscale != 0)
++      if (m_hints.fpsrate > 0 && m_hints.fpsscale != 0)
+         m_mpeg2_sequence->rate = (float)m_hints.fpsrate / m_hints.fpsscale;
+       else
+         m_mpeg2_sequence->rate = 1.0;
+@@ -400,43 +398,41 @@ void CDVDVideoCodecAmlogic::FrameRateTracking(uint8_t *pData, int iSize, double
+       {
+         default:
+         case 0x01:
+-          m_hints.rfpsrate = 24000.0;
+-          m_hints.rfpsscale = 1001.0;
++          m_hints.fpsrate = 24000.0;
++          m_hints.fpsscale = 1001.0;
+           break;
+         case 0x02:
+-          m_hints.rfpsrate = 24000.0;
+-          m_hints.rfpsscale = 1000.0;
++          m_hints.fpsrate = 24000.0;
++          m_hints.fpsscale = 1000.0;
+           break;
+         case 0x03:
+-          m_hints.rfpsrate = 25000.0;
+-          m_hints.rfpsscale = 1000.0;
++          m_hints.fpsrate = 25000.0;
++          m_hints.fpsscale = 1000.0;
+           break;
+         case 0x04:
+-          m_hints.rfpsrate = 30000.0;
+-          m_hints.rfpsscale = 1001.0;
++          m_hints.fpsrate = 30000.0;
++          m_hints.fpsscale = 1001.0;
+           break;
+         case 0x05:
+-          m_hints.rfpsrate = 30000.0;
+-          m_hints.rfpsscale = 1000.0;
++          m_hints.fpsrate = 30000.0;
++          m_hints.fpsscale = 1000.0;
+           break;
+         case 0x06:
+-          m_hints.rfpsrate = 50000.0;
+-          m_hints.rfpsscale = 1000.0;
++          m_hints.fpsrate = 50000.0;
++          m_hints.fpsscale = 1000.0;
+           break;
+         case 0x07:
+-          m_hints.rfpsrate = 60000.0;
+-          m_hints.rfpsscale = 1001.0;
++          m_hints.fpsrate = 60000.0;
++          m_hints.fpsscale = 1001.0;
+           break;
+         case 0x08:
+-          m_hints.rfpsrate = 60000.0;
+-          m_hints.rfpsscale = 1000.0;
++          m_hints.fpsrate = 60000.0;
++          m_hints.fpsscale = 1000.0;
+           break;
+       }
+       m_hints.width    = m_mpeg2_sequence->width;
+       m_hints.height   = m_mpeg2_sequence->height;
+       m_hints.aspect   = m_mpeg2_sequence->ratio;
+-      m_hints.fpsrate  = m_hints.rfpsrate;
+-      m_hints.fpsscale = m_hints.rfpsscale;
+     }
+     return;
+   }
+-- 
+2.1.0
+
+
+From 196da859ab8413bcfa378788e9c71b8ef3ff8b69 Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Sun, 21 Sep 2014 17:20:25 +0300
+Subject: [PATCH 12/16] Fix incorrect frame rate detection of some videos with
+ variable frame rate.
+
+Use FFMPEG's r_frame_rate, if it as valid, as a video stream frame rate, otherwise use avg_frame_rate.
+Also remove CDVDStreamInfo.rfpsscale, CDVDStreamInfo.rfpsrate, CDemuxStreamVideo.irFpsScale and CDemuxStreamVideo.irFpsRate,
+they are not needed anymore.
+---
+ xbmc/cores/dvdplayer/DVDDemuxers/DVDDemux.h        |  4 ---
+ .../cores/dvdplayer/DVDDemuxers/DVDDemuxFFmpeg.cpp | 29 ++++++++--------------
+ xbmc/cores/dvdplayer/DVDStreamInfo.cpp             |  8 ------
+ xbmc/cores/dvdplayer/DVDStreamInfo.h               |  2 --
+ 4 files changed, 10 insertions(+), 33 deletions(-)
+
+diff --git a/xbmc/cores/dvdplayer/DVDDemuxers/DVDDemux.h b/xbmc/cores/dvdplayer/DVDDemuxers/DVDDemux.h
+index d69991e..faf3c9b 100644
+--- a/xbmc/cores/dvdplayer/DVDDemuxers/DVDDemux.h
++++ b/xbmc/cores/dvdplayer/DVDDemuxers/DVDDemux.h
+@@ -151,8 +151,6 @@ public:
+   {
+     iFpsScale = 0;
+     iFpsRate = 0;
+-    irFpsScale = 0;
+-    irFpsRate = 0;
+     iHeight = 0;
+     iWidth = 0;
+     fAspect = 0.0;
+@@ -167,8 +165,6 @@ public:
+   virtual ~CDemuxStreamVideo() {}
+   int iFpsScale; // scale of 1000 and a rate of 29970 will result in 29.97 fps
+   int iFpsRate;
+-  int irFpsScale;
+-  int irFpsRate;
+   int iHeight; // height of the stream reported by the demuxer
+   int iWidth; // width of the stream reported by the demuxer
+   float fAspect; // display aspect of stream
+diff --git a/xbmc/cores/dvdplayer/DVDDemuxers/DVDDemuxFFmpeg.cpp b/xbmc/cores/dvdplayer/DVDDemuxers/DVDDemuxFFmpeg.cpp
+index 3bf1b45..554402b 100644
+--- a/xbmc/cores/dvdplayer/DVDDemuxers/DVDDemuxFFmpeg.cpp
++++ b/xbmc/cores/dvdplayer/DVDDemuxers/DVDDemuxFFmpeg.cpp
+@@ -1124,34 +1124,25 @@ CDemuxStream* CDVDDemuxFFmpeg::AddStream(int iId)
+ #else
+         AVRational r_frame_rate = pStream->r_frame_rate;
+ #endif
++        int rFrameRate = 0;
++        if (r_frame_rate.den && r_frame_rate.num)
++          rFrameRate = r_frame_rate.num / r_frame_rate.den;
++        bool rFrameRateValid = rFrameRate >= 5 && rFrameRate <= 100;
+ 
+-        //average fps is more accurate for mkv files
+-        if (m_bMatroska && pStream->avg_frame_rate.den && pStream->avg_frame_rate.num)
+-        {
+-          st->iFpsRate = pStream->avg_frame_rate.num;
+-          st->iFpsScale = pStream->avg_frame_rate.den;
+-        }
+-        else if(r_frame_rate.den && r_frame_rate.num)
++        if (rFrameRateValid)
+         {
+           st->iFpsRate = r_frame_rate.num;
+           st->iFpsScale = r_frame_rate.den;
+         }
+-        else
+-        {
+-          st->iFpsRate  = 0;
+-          st->iFpsScale = 0;
+-        }
+-
+-        // added for aml hw decoder, mkv frame-rate can be wrong.
+-        if (r_frame_rate.den && r_frame_rate.num)
++        else if(pStream->avg_frame_rate.den && pStream->avg_frame_rate.num)
+         {
+-          st->irFpsRate = r_frame_rate.num;
+-          st->irFpsScale = r_frame_rate.den;
++          st->iFpsRate = pStream->avg_frame_rate.num;
++          st->iFpsScale = pStream->avg_frame_rate.den;
+         }
+         else
+         {
+-          st->irFpsRate = 0;
+-          st->irFpsScale = 0;
++          st->iFpsRate  = 0;
++          st->iFpsScale = 0;
+         }
+ 
+         if (pStream->codec_info_nb_frames >  0
+diff --git a/xbmc/cores/dvdplayer/DVDStreamInfo.cpp b/xbmc/cores/dvdplayer/DVDStreamInfo.cpp
+index c1dbd85..03facbe 100644
+--- a/xbmc/cores/dvdplayer/DVDStreamInfo.cpp
++++ b/xbmc/cores/dvdplayer/DVDStreamInfo.cpp
+@@ -52,8 +52,6 @@ void CDVDStreamInfo::Clear()
+ 
+   fpsscale = 0;
+   fpsrate  = 0;
+-  rfpsscale= 0;
+-  rfpsrate = 0;
+   height   = 0;
+   width    = 0;
+   aspect   = 0.0;
+@@ -97,8 +95,6 @@ bool CDVDStreamInfo::Equal(const CDVDStreamInfo& right, bool withextradata)
+   // VIDEO
+   if( fpsscale != right.fpsscale
+   ||  fpsrate  != right.fpsrate
+-  ||  rfpsscale!= right.rfpsscale
+-  ||  rfpsrate != right.rfpsrate
+   ||  height   != right.height
+   ||  width    != right.width
+   ||  stills   != right.stills
+@@ -159,8 +155,6 @@ void CDVDStreamInfo::Assign(const CDVDStreamInfo& right, bool withextradata)
+   // VIDEO
+   fpsscale = right.fpsscale;
+   fpsrate  = right.fpsrate;
+-  rfpsscale= right.rfpsscale;
+-  rfpsrate = right.rfpsrate;
+   height   = right.height;
+   width    = right.width;
+   aspect   = right.aspect;
+@@ -220,8 +214,6 @@ void CDVDStreamInfo::Assign(const CDemuxStream& right, bool withextradata)
+     const CDemuxStreamVideo *stream = static_cast<const CDemuxStreamVideo*>(&right);
+     fpsscale  = stream->iFpsScale;
+     fpsrate   = stream->iFpsRate;
+-    rfpsscale = stream->irFpsScale;
+-    rfpsrate  = stream->irFpsRate;
+     height    = stream->iHeight;
+     width     = stream->iWidth;
+     aspect    = stream->fAspect;
+diff --git a/xbmc/cores/dvdplayer/DVDStreamInfo.h b/xbmc/cores/dvdplayer/DVDStreamInfo.h
+index de66625..d775d78 100644
+--- a/xbmc/cores/dvdplayer/DVDStreamInfo.h
++++ b/xbmc/cores/dvdplayer/DVDStreamInfo.h
+@@ -58,8 +58,6 @@ public:
+   // VIDEO
+   int fpsscale; // scale of 1000 and a rate of 29970 will result in 29.97 fps
+   int fpsrate;
+-  int rfpsscale;
+-  int rfpsrate;
+   int height; // height of the stream reported by the demuxer
+   int width; // width of the stream reported by the demuxer
+   float aspect; // display aspect as reported by demuxer
+-- 
+2.1.0
+
+
+From e466a6462b641128c5924395222c6db751db429e Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Sun, 19 Oct 2014 16:20:33 +0300
+Subject: [PATCH 13/16] Save settings only if they were modified after the last
+ save
+
+This prevents from multiple saving the same settings and helps to resolve
+the issue on Amlogic G18REF TV-boxes when setiings may be lost after a poweroff.
+
+On G18REF When you press the red button on the remote the system receives a signal that power
+is about to off. XBMC always writes guisettings.xml before exit, and the same settings
+may be written several times from different places in code. But the power gets turned off
+before the system completes all shutdown procedures. There may be the case that guisettings.xml
+is written half-way and couldn't be read upon next boot, so the XBMC creates a new one with
+default settings.
+
+With this fix the settings will be written at exit only once, minimizing the risk of being lost.
+---
+ xbmc/settings/Settings.cpp | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/xbmc/settings/Settings.cpp b/xbmc/settings/Settings.cpp
+index c6ff2f5..75a68fb 100644
+--- a/xbmc/settings/Settings.cpp
++++ b/xbmc/settings/Settings.cpp
+@@ -208,6 +208,17 @@ bool CSettings::Save(const std::string &file)
+   if (!m_settingsManager->Save(root))
+     return false;
+ 
++  // Avoid saving if the settings saved earlier are indetical to the current ones
++  if (CFile::Exists(file))
++  {
++    std::string fileMD5 = CUtil::GetFileMD5(file);
++    TiXmlPrinter xmlPrinter;
++    xmlDoc.Accept(&xmlPrinter);
++    std::string settingsMD5 = XBMC::XBMC_MD5::GetMD5(xmlPrinter.CStr());
++    if (fileMD5 == settingsMD5)
++      return true;
++  }
++
+   return xmlDoc.SaveFile(file);
+ }
+ 
+-- 
+2.1.0
+
+
+From 620972df24e8c43c086426ff651d0c2e00167426 Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Fri, 10 Oct 2014 23:56:59 +0300
+Subject: [PATCH 14/16] Fix periodic video stuttering during playback of some
+ media files and streams
+
+---
+ xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp | 20 ++++++++------------
+ 1 file changed, 8 insertions(+), 12 deletions(-)
+
+diff --git a/xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp b/xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp
+index 78a3e69..10f53c6 100644
+--- a/xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp
++++ b/xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp
+@@ -2036,19 +2036,15 @@ void CAMLCodec::Process()
+ 
+         double error = app_pts - (double)pts_video/PTS_FREQ;
+         double abs_error = fabs(error);
+-        if (abs_error > 0.125)
++        if (abs_error > 0.150)
+         {
+-          //CLog::Log(LOGDEBUG, "CAMLCodec::Process pts diff = %f", error);
+-          if (abs_error > 0.150)
+-          {
+-            // big error so try to reset pts_pcrscr
+-            SetVideoPtsSeconds(app_pts);
+-          }
+-          else
+-          {
+-            // small error so try to avoid a frame jump
+-            SetVideoPtsSeconds((double)pts_video/PTS_FREQ + error/4);
+-          }
++          // big error so try to reset pts_pcrscr
++          SetVideoPtsSeconds(app_pts);
++        }
++        else
++        {
++          // small error so try to avoid a frame jump
++          SetVideoPtsSeconds((double)pts_video/PTS_FREQ + error/4);
+         }
+       }
+     }
+-- 
+2.1.0
+
+
+From 17c1e6fce256e259d2d5508348ed36af47a86720 Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Thu, 6 Nov 2014 08:14:39 +0200
+Subject: [PATCH 15/16] Remove dependency on libamplayer and amffmpeg
+
+---
+ xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp  | 79 +---------------------
+ .../DVDCodecs/Video/DVDVideoCodecAmlogic.cpp       |  3 -
+ 2 files changed, 3 insertions(+), 79 deletions(-)
+
+diff --git a/xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp b/xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp
+index 10f53c6..5436cb7 100644
+--- a/xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp
++++ b/xbmc/cores/dvdplayer/DVDCodecs/Video/AMLCodec.cpp
+@@ -51,9 +51,9 @@
+ #include <stdlib.h>
+ #include <sys/ioctl.h>
+ 
+-// amcodec include
+ extern "C" {
+ #include <amcodec/codec.h>
++#include <libavutil/avutil.h>
+ }  // extern "C"
+ 
+ typedef struct {
+@@ -92,19 +92,11 @@ public:
+   virtual int codec_set_cntl_mode(codec_para_t *pcodec, unsigned int mode)=0;
+   virtual int codec_set_cntl_avthresh(codec_para_t *pcodec, unsigned int avthresh)=0;
+   virtual int codec_set_cntl_syncthresh(codec_para_t *pcodec, unsigned int syncthresh)=0;
+-
+-  // grab these from libamplayer
+-  virtual int h263vld(unsigned char *inbuf, unsigned char *outbuf, int inbuf_len, int s263)=0;
+-  virtual int decodeble_h263(unsigned char *buf)=0;
+-
+-  // grab this from amffmpeg so we do not have to load DllAvUtil
+-  virtual AVRational av_d2q(double d, int max)=0;
+ };
+ 
+ class DllLibAmCodec : public DllDynamic, DllLibamCodecInterface
+ {
+-  // libamcodec is static linked into libamplayer.so
+-  DECLARE_DLL_WRAPPER(DllLibAmCodec, "libamplayer.so")
++  DECLARE_DLL_WRAPPER(DllLibAmCodec, "libamcodec.so")
+ 
+   DEFINE_METHOD1(int, codec_init,               (codec_para_t *p1))
+   DEFINE_METHOD1(int, codec_close,              (codec_para_t *p1))
+@@ -122,11 +114,6 @@ class DllLibAmCodec : public DllDynamic, DllLibamCodecInterface
+   DEFINE_METHOD2(int, codec_set_cntl_avthresh,  (codec_para_t *p1, unsigned int p2))
+   DEFINE_METHOD2(int, codec_set_cntl_syncthresh,(codec_para_t *p1, unsigned int p2))
+ 
+-  DEFINE_METHOD4(int, h263vld,                  (unsigned char *p1, unsigned char *p2, int p3, int p4))
+-  DEFINE_METHOD1(int, decodeble_h263,           (unsigned char *p1))
+-
+-  DEFINE_METHOD2(AVRational, av_d2q,            (double p1, int p2))
+-
+   BEGIN_METHOD_RESOLVE()
+     RESOLVE_METHOD(codec_init)
+     RESOLVE_METHOD(codec_close)
+@@ -143,11 +130,6 @@ class DllLibAmCodec : public DllDynamic, DllLibamCodecInterface
+     RESOLVE_METHOD(codec_set_cntl_mode)
+     RESOLVE_METHOD(codec_set_cntl_avthresh)
+     RESOLVE_METHOD(codec_set_cntl_syncthresh)
+-
+-    RESOLVE_METHOD(h263vld)
+-    RESOLVE_METHOD(decodeble_h263)
+-
+-    RESOLVE_METHOD(av_d2q)
+   END_METHOD_RESOLVE()
+ 
+ public:
+@@ -346,8 +328,6 @@ typedef struct am_private_t
+   unsigned int      video_ratio64;
+   unsigned int      video_rate;
+   unsigned int      video_rotation_degree;
+-  int               flv_flag;
+-  int               h263_decodable;
+   int               extrasize;
+   uint8_t           *extradata;
+   DllLibAmCodec     *m_dll;
+@@ -440,7 +420,6 @@ static vformat_t codecid_to_vformat(enum AVCodecID id)
+     case AV_CODEC_ID_H263I:
+     case AV_CODEC_ID_MSMPEG4V2:
+     case AV_CODEC_ID_MSMPEG4V3:
+-    case AV_CODEC_ID_FLV1:
+       format = VFORMAT_MPEG4;
+       break;
+     case AV_CODEC_ID_RV10:
+@@ -1254,51 +1233,6 @@ int set_header_info(am_private_t *para)
+       {
+         return divx3_prefix(pkt);
+       }
+-      else if (para->video_codec_type == VIDEO_DEC_FORMAT_H263)
+-      {
+-        return PLAYER_UNSUPPORT;
+-        unsigned char *vld_buf;
+-        int vld_len, vld_buf_size = para->video_width * para->video_height * 2;
+-
+-        if (!pkt->data_size) {
+-            return PLAYER_SUCCESS;
+-        }
+-
+-        if ((pkt->data[0] == 0) && (pkt->data[1] == 0) && (pkt->data[2] == 1) && (pkt->data[3] == 0xb6)) {
+-            return PLAYER_SUCCESS;
+-        }
+-
+-        vld_buf = (unsigned char*)malloc(vld_buf_size);
+-        if (!vld_buf) {
+-            return PLAYER_NOMEM;
+-        }
+-
+-        if (para->flv_flag) {
+-            vld_len = para->m_dll->h263vld(pkt->data, vld_buf, pkt->data_size, 1);
+-        } else {
+-            if (0 == para->h263_decodable) {
+-                para->h263_decodable = para->m_dll->decodeble_h263(pkt->data);
+-                if (0 == para->h263_decodable) {
+-                    CLog::Log(LOGDEBUG, "[%s]h263 unsupport video and audio, exit", __FUNCTION__);
+-                    return PLAYER_UNSUPPORT;
+-                }
+-            }
+-            vld_len = para->m_dll->h263vld(pkt->data, vld_buf, pkt->data_size, 0);
+-        }
+-
+-        if (vld_len > 0) {
+-            if (pkt->buf) {
+-                free(pkt->buf);
+-            }
+-            pkt->buf = vld_buf;
+-            pkt->buf_size = vld_buf_size;
+-            pkt->data = pkt->buf;
+-            pkt->data_size = vld_len;
+-        } else {
+-            free(vld_buf);
+-            pkt->data_size = 0;
+-        }
+-      }
+     } else if (para->video_format == VFORMAT_VC1) {
+         if (para->video_codec_type == VIDEO_DEC_FORMAT_WMV3) {
+             unsigned i, check_sum = 0, data_len = 0;
+@@ -1491,7 +1425,7 @@ bool CAMLCodec::OpenDecoder(CDVDStreamInfo &hints)
+   am_private->video_pid        = hints.pid;
+ 
+   // handle video ratio
+-  AVRational video_ratio       = m_dll->av_d2q(1, SHRT_MAX);
++  AVRational video_ratio       = av_d2q(1, SHRT_MAX);
+   //if (!hints.forced_aspect)
+   //  video_ratio = m_dll->av_d2q(hints.aspect, SHRT_MAX);
+   am_private->video_ratio      = ((int32_t)video_ratio.num << 16) | video_ratio.den;
+@@ -1562,13 +1496,6 @@ bool CAMLCodec::OpenDecoder(CDVDStreamInfo &hints)
+   else
+     am_private->video_codec_type = codec_tag_to_vdec_type(am_private->video_codec_id);
+ 
+-  am_private->flv_flag = 0;
+-  if (am_private->video_codec_id == AV_CODEC_ID_FLV1)
+-  {
+-    am_private->video_codec_tag = CODEC_TAG_F263;
+-    am_private->flv_flag = 1;
+-  }
+-
+   CLog::Log(LOGDEBUG, "CAMLCodec::OpenDecoder "
+     "hints.width(%d), hints.height(%d), hints.codec(%d), hints.codec_tag(%d), hints.pid(%d)",
+     hints.width, hints.height, hints.codec, hints.codec_tag, hints.pid);
+diff --git a/xbmc/cores/dvdplayer/DVDCodecs/Video/DVDVideoCodecAmlogic.cpp b/xbmc/cores/dvdplayer/DVDCodecs/Video/DVDVideoCodecAmlogic.cpp
+index 21c7869..d287d67 100644
+--- a/xbmc/cores/dvdplayer/DVDCodecs/Video/DVDVideoCodecAmlogic.cpp
++++ b/xbmc/cores/dvdplayer/DVDCodecs/Video/DVDVideoCodecAmlogic.cpp
+@@ -114,9 +114,6 @@ bool CDVDVideoCodecAmlogic::Open(CDVDStreamInfo &hints, CDVDCodecOptions &option
+       // amcodec can't handle h263
+       return false;
+       break;
+-    case AV_CODEC_ID_FLV1:
+-      m_pFormatName = "am-flv1";
+-      break;
+     case AV_CODEC_ID_RV10:
+     case AV_CODEC_ID_RV20:
+     case AV_CODEC_ID_RV30:
+-- 
+2.1.0
+
+
+From ab6a7eec2046e2e524be8a2b5c6d5a424cfe13c3 Mon Sep 17 00:00:00 2001
+From: Alex Deryskyba <alex@codesnake.com>
+Date: Sun, 2 Nov 2014 15:54:29 +0200
+Subject: [PATCH 16/16] Add some key mappings for HDMI CEC
+
+---
+ xbmc/input/linux/LinuxInputDevices.cpp | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/xbmc/input/linux/LinuxInputDevices.cpp b/xbmc/input/linux/LinuxInputDevices.cpp
+index b24f66f..014d342 100644
+--- a/xbmc/input/linux/LinuxInputDevices.cpp
++++ b/xbmc/input/linux/LinuxInputDevices.cpp
+@@ -250,6 +250,11 @@ KeyMap keyMap[] = {
+   { KEY_PRINT         , XBMCK_PRINT       },
+   { KEY_QUESTION      , XBMCK_HELP        },
+   { KEY_BACK          , XBMCK_BACKSPACE   },
++  { KEY_SELECT        , XBMCK_RETURN      },
++  { KEY_RED           , XBMCK_TAB         },
++  { KEY_GREEN         , XBMCK_z           },
++  { KEY_YELLOW        , XBMCK_i           },
++  { KEY_BLUE          , XBMCK_c           },
+   // The Little Black Box Remote Additions
+   { 384               , XBMCK_LEFT        }, // Red
+   { 378               , XBMCK_RIGHT       }, // Green
+-- 
+2.1.0
+

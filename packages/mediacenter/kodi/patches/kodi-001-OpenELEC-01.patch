@@ -1,0 +1,421 @@
+From 53572760d0eced32133af3a04df923634340c07f Mon Sep 17 00:00:00 2001
+From: Stefan Saraev <stefan@saraev.ca>
+Date: Thu, 17 Apr 2014 12:12:50 +0300
+Subject: [PATCH 1/6] use udevil to umount
+
+---
+ xbmc/linux/PosixMountProvider.cpp   | 2 +-
+ xbmc/storage/linux/UDevProvider.cpp | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/xbmc/linux/PosixMountProvider.cpp b/xbmc/linux/PosixMountProvider.cpp
+index 610d0d7..6fea7e7 100644
+--- a/xbmc/linux/PosixMountProvider.cpp
++++ b/xbmc/linux/PosixMountProvider.cpp
+@@ -130,7 +130,7 @@ bool CPosixMountProvider::Eject(const std::string& mountpath)
+ {
+   // just go ahead and try to umount the disk
+   // if it does umount, life is good, if not, no loss.
+-  std::string cmd = "umount \"" + mountpath + "\"";
++  std::string cmd = "udevil umount \"" + mountpath + "\"";
+   int status = system(cmd.c_str());
+ 
+   if (status == 0)
+diff --git a/xbmc/storage/linux/UDevProvider.cpp b/xbmc/storage/linux/UDevProvider.cpp
+index 0ca370b..dffee34 100644
+--- a/xbmc/storage/linux/UDevProvider.cpp
++++ b/xbmc/storage/linux/UDevProvider.cpp
+@@ -207,7 +207,7 @@ bool CUDevProvider::Eject(const std::string& mountpath)
+ {
+   // just go ahead and try to umount the disk
+   // if it does umount, life is good, if not, no loss.
+-  std::string cmd = "umount \"" + mountpath + "\"";
++  std::string cmd = "udevil umount \"" + mountpath + "\"";
+   int status = system(cmd.c_str());
+ 
+   if (status == 0)
+-- 
+2.1.0
+
+
+From 0ccbc5043710b3c770e076d17b292964c91bfd23 Mon Sep 17 00:00:00 2001
+From: Stefan Saraev <stefan@saraev.ca>
+Date: Fri, 8 Aug 2014 18:22:44 +0300
+Subject: [PATCH 2/6] use a wrapper to setup systemd services
+
+---
+ xbmc/addons/Service.cpp | 23 +++++++++++++++++++++++
+ xbmc/addons/Service.h   |  3 +++
+ 2 files changed, 26 insertions(+)
+
+diff --git a/xbmc/addons/Service.cpp b/xbmc/addons/Service.cpp
+index c406b11..f68b427 100644
+--- a/xbmc/addons/Service.cpp
++++ b/xbmc/addons/Service.cpp
+@@ -53,6 +53,10 @@ AddonPtr CService::Clone() const
+ bool CService::Start()
+ {
+   bool ret = true;
++
++  // systemctl enable but dont force start
++  CallOEWrapper(ID(), false, true);
++
+   switch (m_type)
+   {
+ #ifdef HAS_PYTHON
+@@ -113,13 +117,26 @@ void CService::BuildServiceType()
+   }
+ }
+ 
++void CService::CallOEWrapper(const std::string& ID, bool disable, bool check)
++{
++  char cmd[255];
++  snprintf(cmd, sizeof(cmd), "/usr/lib/openelec/systemd-addon-wrapper %s %d", ID.c_str(), disable, check);
++  system(cmd);
++}
++
+ void CService::OnDisabled()
+ {
++  // systemctl stop & disable on addon disable
++  CallOEWrapper(ID(), true, false);
++
+   Stop();
+ }
+ 
+ void CService::OnEnabled()
+ {
++  // systemctl enable & start on addon enable
++  CallOEWrapper(ID(), false, false);
++
+   Start();
+ }
+ 
+@@ -145,7 +162,13 @@ void CService::OnPostInstall(bool restart, bool update)
+     {
+       boost::shared_ptr<CService> service = boost::dynamic_pointer_cast<CService>(localAddon);
+       if (service)
++      {
++        // systemctl stop & disable / enable & start on addon upgrade
++        CallOEWrapper(ID(), true, false);
++        CallOEWrapper(ID(), false, false);
++
+         service->Start();
++      }
+     }
+   }
+ }
+diff --git a/xbmc/addons/Service.h b/xbmc/addons/Service.h
+index 98ec8b6..accd9e2 100644
+--- a/xbmc/addons/Service.h
++++ b/xbmc/addons/Service.h
+@@ -47,6 +47,9 @@ namespace ADDON
+     bool Stop();
+     TYPE GetServiceType() { return m_type; }
+     START_OPTION GetStartOption() { return m_startOption; }
++
++    void CallOEWrapper(const std::string& ID, bool disable, bool check);
++
+     virtual void OnDisabled();
+     virtual void OnEnabled();
+     virtual bool OnPreInstall();
+-- 
+2.1.0
+
+
+From 4a2b18bfe3f7a8a6f6d2e1683b33b111fdf1c3e8 Mon Sep 17 00:00:00 2001
+From: Stefan Saraev <stefan@saraev.ca>
+Date: Mon, 18 Aug 2014 17:46:54 +0300
+Subject: [PATCH 3/6] setup timezone
+
+on TZ country setting change, store the value in format
+TIMEZONE=Xx/Yyy to /storage/.cache/timezone to be used with
+tz-data.service
+---
+ xbmc/linux/LinuxTimezone.cpp | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/xbmc/linux/LinuxTimezone.cpp b/xbmc/linux/LinuxTimezone.cpp
+index 7164d42..40355fa 100644
+--- a/xbmc/linux/LinuxTimezone.cpp
++++ b/xbmc/linux/LinuxTimezone.cpp
+@@ -39,6 +39,8 @@
+ #include "settings/lib/Setting.h"
+ #include "settings/Settings.h"
+ 
++#include <fstream>
++
+ using namespace std;
+ 
+ CLinuxTimezone::CLinuxTimezone() : m_IsDST(0)
+@@ -158,6 +160,16 @@ void CLinuxTimezone::OnSettingChanged(const CSetting *setting)
+   const std::string &settingId = setting->GetId();
+   if (settingId == "locale.timezone")
+   {
++    std::ofstream out("/storage/.cache/timezone");
++    if (out)
++    {
++      const std::string tz = std::string("TIMEZONE=") + ((CSettingString*)setting)->GetValue().c_str();
++      out << tz << std::endl;
++      out.flush();
++      out.close();
++      system("systemctl restart tz-data.service");
++    }
++
+     SetTimezone(((CSettingString*)setting)->GetValue());
+ 
+     CDateTime::ResetTimezoneBias();
+-- 
+2.1.0
+
+
+From 2b1463175bc1fd84a2f52deb15344f2f7d408b23 Mon Sep 17 00:00:00 2001
+From: vpeter4 <peter.vicman@gmail.com>
+Date: Wed, 1 Oct 2014 10:12:11 +0200
+Subject: [PATCH 4/6] make binary addons executable
+
+add executable mode to all files in addon's bin folder
+---
+ xbmc/addons/AddonInstaller.cpp | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+diff --git a/xbmc/addons/AddonInstaller.cpp b/xbmc/addons/AddonInstaller.cpp
+index c61da1b..d47f72b 100644
+--- a/xbmc/addons/AddonInstaller.cpp
++++ b/xbmc/addons/AddonInstaller.cpp
+@@ -39,6 +39,9 @@
+ #include "dialogs/GUIDialogKaiToast.h"
+ #include "dialogs/GUIDialogProgress.h"
+ #include "URL.h"
++#include <iostream>
++#include <dirent.h>
++#include <sys/stat.h>
+ 
+ using namespace std;
+ using namespace XFILE;
+@@ -715,6 +718,26 @@ bool CAddonInstallJob::Install(const std::string &installFrom, const AddonPtr& r
+ 
+ void CAddonInstallJob::OnPostInstall(bool reloadAddon)
+ {
++  std::string addonDirPath;
++  std::string chmodFilePath;
++  DIR *addonsDir;
++  struct dirent *fileDirent;
++  struct stat fileStat;
++  int statRet;
++
++  addonDirPath = "/storage/.kodi/addons/" + m_addon->ID() + "/bin/";
++  if ((addonsDir = opendir(addonDirPath.c_str())) != NULL)
++  {
++    while ((fileDirent = readdir(addonsDir)) != NULL)
++    {
++      chmodFilePath = addonDirPath + fileDirent->d_name;
++      statRet = stat(chmodFilePath.c_str(), &fileStat);
++      if (statRet == 0 && (fileStat.st_mode & S_IFMT) != S_IFDIR)
++        chmod(chmodFilePath.c_str(), fileStat.st_mode | S_IXUSR | S_IXGRP | S_IXOTH);
++    }
++    closedir(addonsDir);
++  }
++
+   if (CSettings::Get().GetBool("general.addonnotifications"))
+   {
+     CGUIDialogKaiToast::QueueNotification(m_addon->Icon(),
+-- 
+2.1.0
+
+
+From 6e045b6bd58a1a7e66f1e12671e7e9d968868a02 Mon Sep 17 00:00:00 2001
+From: Stefan Saraev <stefan@saraev.ca>
+Date: Thu, 16 Oct 2014 19:32:46 +0300
+Subject: [PATCH 5/6] disable minimize
+
+---
+ xbmc/Application.cpp | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/xbmc/Application.cpp b/xbmc/Application.cpp
+index fabe145..01d9438 100644
+--- a/xbmc/Application.cpp
++++ b/xbmc/Application.cpp
+@@ -4985,7 +4985,6 @@ bool CApplication::SwitchToFullScreen()
+ 
+ void CApplication::Minimize()
+ {
+-  g_Windowing.Minimize();
+ }
+ 
+ PLAYERCOREID CApplication::GetCurrentPlayer()
+-- 
+2.1.0
+
+
+From c1771ebcabf74893a57fb8ae0d98f8fe07f01c4d Mon Sep 17 00:00:00 2001
+From: Stefan Saraev <stefan@saraev.ca>
+Date: Mon, 15 Dec 2014 21:28:54 +0200
+Subject: [PATCH 6/6] handle SIGTERM
+
+In some situations, due to deadlocks or crashes, xbmc fails to exit properly in
+CApplication::Stop(), so  g_powerManager.Reboot() / g_powerManager.Powerdown() never gets
+called, that's a big no-no for openelec as our users can't shutdown or reboot.
+There are few addons reported to cause this behaviour: trakkt.tv, watchdog, weather.underground.
+
+I've also noticed that sometimes new threads (FileCache ??) get started AFTER
+CApplication::Stop() is called, delaying shutdown with 1+ minute (2 curl timeoouts?).
+The problem seems to be in CJobManager::CancelJobs() but I am too lame to understand where,
+why, and how to fix it.
+
+To me, it seems best to let systemd handle it. systemd sends SIGTERM, then waits
+TimeoutStopSec=xx seconds then sends SIGKILL,s so dont call g_application.Stop() from
+ApplicationMessenger as it can not be trusted. save the requested exitcode instead
+(that's required for CEC to switch off the tv) and do it from a simple SIGTERM handler instead.
+
+CEC thread has enough time (5 seconds in xbmc.service) to switch of the TV after receiving OnQuit.
+As a side "effect", now guisettings.xml will ALWAYS be saved, even if shutdown / rebooot
+is requested externaly (ssh, 3rdparty script).
+---
+ xbmc/Application.cpp          | 10 ++++++++--
+ xbmc/Application.h            |  1 +
+ xbmc/ApplicationMessenger.cpp |  6 ++++--
+ xbmc/XBApplicationEx.cpp      |  1 +
+ xbmc/XBApplicationEx.h        |  1 +
+ xbmc/main/main.cpp            | 16 ++++++++++++++++
+ 6 files changed, 31 insertions(+), 4 deletions(-)
+
+diff --git a/xbmc/Application.cpp b/xbmc/Application.cpp
+index 01d9438..310faa7 100644
+--- a/xbmc/Application.cpp
++++ b/xbmc/Application.cpp
+@@ -2854,12 +2854,19 @@ bool CApplication::Cleanup()
+   }
+ }
+ 
++void CApplication::SetExitCode(int exitCode)
++{
++  // save it for CEC
++  m_ExitCode = exitCode;
++  m_ExitCodeSet = true;
++}
++
+ void CApplication::Stop(int exitCode)
+ {
+   try
+   {
+     CVariant vExitCode(CVariant::VariantTypeObject);
+-    vExitCode["exitcode"] = exitCode;
++    vExitCode["exitcode"] = m_ExitCode;
+     CAnnouncementManager::Get().Announce(System, "xbmc", "OnQuit", vExitCode);
+ 
+     SaveFileState(true);
+@@ -2883,7 +2890,6 @@ void CApplication::Stop(int exitCode)
+ 
+     m_bStop = true;
+     m_AppFocused = false;
+-    m_ExitCode = exitCode;
+     CLog::Log(LOGNOTICE, "stop all");
+ 
+     // cancel any jobs from the jobmanager
+diff --git a/xbmc/Application.h b/xbmc/Application.h
+index 59f917f..d85d8b7 100644
+--- a/xbmc/Application.h
++++ b/xbmc/Application.h
+@@ -156,6 +156,7 @@ public:
+   bool StartPVRManager();
+   void StopPVRManager();
+   bool IsCurrentThread() const;
++  void SetExitCode(int exitCode);
+   void Stop(int exitCode);
+   void RestartApp();
+   void UnloadSkin(bool forReload = false);
+diff --git a/xbmc/ApplicationMessenger.cpp b/xbmc/ApplicationMessenger.cpp
+index 344886b..8c93045 100644
+--- a/xbmc/ApplicationMessenger.cpp
++++ b/xbmc/ApplicationMessenger.cpp
+@@ -261,13 +261,14 @@ void CApplicationMessenger::ProcessMessage(ThreadMessage *pMsg)
+ 
+     case TMSG_POWERDOWN:
+       {
+-        g_application.Stop(EXITCODE_POWERDOWN);
++        g_application.SetExitCode(EXITCODE_POWERDOWN);
+         g_powerManager.Powerdown();
+       }
+       break;
+ 
+     case TMSG_QUIT:
+       {
++        g_application.SetExitCode(EXITCODE_QUIT);
+         g_application.Stop(EXITCODE_QUIT);
+       }
+       break;
+@@ -289,7 +290,7 @@ void CApplicationMessenger::ProcessMessage(ThreadMessage *pMsg)
+     case TMSG_RESTART:
+     case TMSG_RESET:
+       {
+-        g_application.Stop(EXITCODE_REBOOT);
++        g_application.SetExitCode(EXITCODE_REBOOT);
+         g_powerManager.Reboot();
+       }
+       break;
+@@ -297,6 +298,7 @@ void CApplicationMessenger::ProcessMessage(ThreadMessage *pMsg)
+     case TMSG_RESTARTAPP:
+       {
+ #if defined(TARGET_WINDOWS) || defined(TARGET_LINUX)
++        g_application.SetExitCode(EXITCODE_RESTARTAPP);
+         g_application.Stop(EXITCODE_RESTARTAPP);
+ #endif
+       }
+diff --git a/xbmc/XBApplicationEx.cpp b/xbmc/XBApplicationEx.cpp
+index ad6a145..6058938 100644
+--- a/xbmc/XBApplicationEx.cpp
++++ b/xbmc/XBApplicationEx.cpp
+@@ -40,6 +40,7 @@ CXBApplicationEx::CXBApplicationEx()
+   m_bStop = false;
+   m_AppFocused = true;
+   m_ExitCode = EXITCODE_QUIT;
++  m_ExitCodeSet = false;
+   m_renderGUI = false;
+ }
+ 
+diff --git a/xbmc/XBApplicationEx.h b/xbmc/XBApplicationEx.h
+index c46cba1..ed3f35f 100644
+--- a/xbmc/XBApplicationEx.h
++++ b/xbmc/XBApplicationEx.h
+@@ -40,6 +40,7 @@ public:
+   // Variables for timing
+   bool m_bStop;
+   int  m_ExitCode;
++  bool m_ExitCodeSet;
+   bool m_AppFocused;
+   bool m_renderGUI;
+ 
+diff --git a/xbmc/main/main.cpp b/xbmc/main/main.cpp
+index ec86426..c20d793 100644
+--- a/xbmc/main/main.cpp
++++ b/xbmc/main/main.cpp
+@@ -40,9 +40,25 @@
+ #include "input/linux/LIRC.h"
+ #endif
+ #include "XbmcContext.h"
++#include "Application.h"
++
++void xbmc_term_handler(int signum)
++{
++  if (!g_application.m_ExitCodeSet) {
++    CLog::Log(LOGINFO, "Received SIGTERM...");
++    g_application.SetExitCode(EXITCODE_RESTARTAPP);
++    g_application.Stop(EXITCODE_RESTARTAPP);
++  }
++}
+ 
+ int main(int argc, char* argv[])
+ {
++  // SIGTERM handler
++  struct sigaction action;
++  memset(&action, 0, sizeof(struct sigaction));
++  action.sa_handler = xbmc_term_handler;
++  sigaction(SIGTERM, &action, NULL);
++
+   // set up some xbmc specific relationships
+   XBMC::Context context;
+ 
+-- 
+2.1.0
+
