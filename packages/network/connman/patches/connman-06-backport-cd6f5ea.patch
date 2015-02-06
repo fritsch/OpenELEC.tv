@@ -1,0 +1,211 @@
+From fa3dfc76cbf8b2c665f5e67f3c61d225e6d62e36 Mon Sep 17 00:00:00 2001
+From: Stefan Saraev <stefan@saraev.ca>
+Date: Thu, 5 Feb 2015 23:44:50 +0200
+Subject: [PATCH] backport cd6f5ea
+
+---
+ gdhcp/client.c |   48 +++++++++++++++++++++++++++++++++++++++++++-----
+ gdhcp/common.c |    8 ++++++--
+ gdhcp/common.h |    3 ++-
+ gdhcp/server.c |    4 ++--
+ 4 files changed, 53 insertions(+), 10 deletions(-)
+
+diff --git a/gdhcp/client.c b/gdhcp/client.c
+index 98710d2..621c924 100644
+--- a/gdhcp/client.c
++++ b/gdhcp/client.c
+@@ -156,6 +156,7 @@ struct _GDHCPClient {
+ 	uint32_t expire;
+ 	bool retransmit;
+ 	struct timeval start_time;
++	bool request_bcast;
+ };
+ 
+ static inline void debug(GDHCPClient *client, const char *format, ...)
+@@ -456,15 +457,26 @@ static int send_discover(GDHCPClient *dhcp_client, uint32_t requested)
+ 
+ 	add_send_options(dhcp_client, &packet);
+ 
++	/*
++	 * If we do not get a reply to DISCOVER packet, then we try with
++	 * broadcast flag set. So first packet is sent without broadcast flag,
++	 * first retry is with broadcast flag, second retry is without it etc.
++	 * Reason is various buggy routers/AP that either eat the other or vice
++	 * versa. In the receiving side we then find out what kind of packet
++	 * the server can send.
++	 */
+ 	return dhcp_send_raw_packet(&packet, INADDR_ANY, CLIENT_PORT,
+ 					INADDR_BROADCAST, SERVER_PORT,
+-					MAC_BCAST_ADDR, dhcp_client->ifindex);
++					MAC_BCAST_ADDR, dhcp_client->ifindex,
++				dhcp_client->retry_times % 2);
+ }
+ 
+ static int send_request(GDHCPClient *dhcp_client)
+ {
+ 	struct dhcp_packet packet;
+-	debug(dhcp_client, "sending DHCP request");
++
++	debug(dhcp_client, "sending DHCP request (state %d)",
++		dhcp_client->state);
+ 
+ 	init_packet(dhcp_client, &packet, DHCPREQUEST);
+ 
+@@ -495,7 +507,8 @@ static int send_request(GDHCPClient *dhcp_client)
+ 
+ 	return dhcp_send_raw_packet(&packet, INADDR_ANY, CLIENT_PORT,
+ 					INADDR_BROADCAST, SERVER_PORT,
+-					MAC_BCAST_ADDR, dhcp_client->ifindex);
++					MAC_BCAST_ADDR, dhcp_client->ifindex,
++				dhcp_client->request_bcast);
+ }
+ 
+ static int send_release(GDHCPClient *dhcp_client,
+@@ -1187,6 +1200,7 @@ GDHCPClient *g_dhcp_client_new(GDHCPType type,
+ 	dhcp_client->duid_len = 0;
+ 	dhcp_client->last_request = time(NULL);
+ 	dhcp_client->expire = 0;
++	dhcp_client->request_bcast = false;
+ 
+ 	*error = G_DHCP_CLIENT_ERROR_NONE;
+ 
+@@ -1294,7 +1308,8 @@ static bool sanity_check(struct ip_udp_dhcp_packet *packet, int bytes)
+ 	return true;
+ }
+ 
+-static int dhcp_recv_l2_packet(struct dhcp_packet *dhcp_pkt, int fd)
++static int dhcp_recv_l2_packet(struct dhcp_packet *dhcp_pkt, int fd,
++				struct sockaddr_in *dst_addr)
+ {
+ 	int bytes;
+ 	struct ip_udp_dhcp_packet packet;
+@@ -1339,6 +1354,8 @@ static int dhcp_recv_l2_packet(struct dhcp_packet *dhcp_pkt, int fd)
+ 	if (dhcp_pkt->cookie != htonl(DHCP_MAGIC))
+ 		return -1;
+ 
++	dst_addr->sin_addr.s_addr = packet.ip.daddr;
++
+ 	return bytes - (sizeof(packet.ip) + sizeof(packet.udp));
+ }
+ 
+@@ -2234,6 +2251,7 @@ static gboolean listener_event(GIOChannel *channel, GIOCondition condition,
+ 							gpointer user_data)
+ {
+ 	GDHCPClient *dhcp_client = user_data;
++	struct sockaddr_in dst_addr = { 0 };
+ 	struct dhcp_packet packet;
+ 	struct dhcpv6_packet *packet6 = NULL;
+ 	uint8_t *message_type = NULL, *client_id = NULL, *option,
+@@ -2260,7 +2278,8 @@ static gboolean listener_event(GIOChannel *channel, GIOCondition condition,
+ 
+ 	if (dhcp_client->listen_mode == L2) {
+ 		re = dhcp_recv_l2_packet(&packet,
+-					dhcp_client->listener_sockfd);
++					dhcp_client->listener_sockfd,
++					&dst_addr);
+ 	} else if (dhcp_client->listen_mode == L3) {
+ 		if (dhcp_client->type == G_DHCP_IPV6) {
+ 			re = dhcpv6_recv_l3_packet(&packet6, buf, sizeof(buf),
+@@ -2349,10 +2368,28 @@ static gboolean listener_event(GIOChannel *channel, GIOCondition condition,
+ 
+ 		dhcp_client->state = REQUESTING;
+ 
++		if (dst_addr.sin_addr.s_addr == INADDR_BROADCAST)
++			dhcp_client->request_bcast = true;
++		else
++			dhcp_client->request_bcast = false;
++
++		debug(dhcp_client, "init ip %s -> %sadding broadcast flag",
++			inet_ntoa(dst_addr.sin_addr),
++			dhcp_client->request_bcast ? "" : "not ");
++
+ 		start_request(dhcp_client);
+ 
+ 		return TRUE;
+ 	case REBOOTING:
++		if (dst_addr.sin_addr.s_addr == INADDR_BROADCAST)
++			dhcp_client->request_bcast = true;
++		else
++			dhcp_client->request_bcast = false;
++
++		debug(dhcp_client, "ip %s -> %sadding broadcast flag",
++			inet_ntoa(dst_addr.sin_addr),
++			dhcp_client->request_bcast ? "" : "not ");
++		/* fall through */
+ 	case REQUESTING:
+ 	case RENEWING:
+ 	case REBINDING:
+@@ -2839,6 +2876,7 @@ void g_dhcp_client_stop(GDHCPClient *dhcp_client)
+ 	dhcp_client->requested_ip = 0;
+ 	dhcp_client->state = RELEASED;
+ 	dhcp_client->lease_seconds = 0;
++	dhcp_client->request_bcast = false;
+ }
+ 
+ GList *g_dhcp_client_get_option(GDHCPClient *dhcp_client,
+diff --git a/gdhcp/common.c b/gdhcp/common.c
+index a43530a..937dbd2 100644
+--- a/gdhcp/common.c
++++ b/gdhcp/common.c
+@@ -541,8 +541,9 @@ int dhcpv6_send_packet(int index, struct dhcpv6_packet *dhcp_pkt, int len)
+ }
+ 
+ int dhcp_send_raw_packet(struct dhcp_packet *dhcp_pkt,
+-		uint32_t source_ip, int source_port, uint32_t dest_ip,
+-			int dest_port, const uint8_t *dest_arp, int ifindex)
++			uint32_t source_ip, int source_port,
++			uint32_t dest_ip, int dest_port,
++			const uint8_t *dest_arp, int ifindex, bool bcast)
+ {
+ 	struct sockaddr_ll dest;
+ 	struct ip_udp_dhcp_packet packet;
+@@ -559,6 +560,9 @@ int dhcp_send_raw_packet(struct dhcp_packet *dhcp_pkt,
+ 	if (fd < 0)
+ 		return -errno;
+ 
++       if (bcast)
++               dhcp_pkt->flags |= htons(BROADCAST_FLAG);
++
+ 	memset(&dest, 0, sizeof(dest));
+ 	memset(&packet, 0, sizeof(packet));
+ 	packet.data = *dhcp_pkt;
+diff --git a/gdhcp/common.h b/gdhcp/common.h
+index e4a4251..c692799 100644
+--- a/gdhcp/common.h
++++ b/gdhcp/common.h
+@@ -196,7 +196,8 @@ void dhcpv6_init_header(struct dhcpv6_packet *packet, uint8_t type);
+ int dhcp_send_raw_packet(struct dhcp_packet *dhcp_pkt,
+ 			uint32_t source_ip, int source_port,
+ 			uint32_t dest_ip, int dest_port,
+-			const uint8_t *dest_arp, int ifindex);
++			const uint8_t *dest_arp, int ifindex,
++			bool bcast);
+ int dhcpv6_send_packet(int index, struct dhcpv6_packet *dhcp_pkt, int len);
+ int dhcp_send_kernel_packet(struct dhcp_packet *dhcp_pkt,
+ 			uint32_t source_ip, int source_port,
+diff --git a/gdhcp/server.c b/gdhcp/server.c
+index 728992d..aa40488 100644
+--- a/gdhcp/server.c
++++ b/gdhcp/server.c
+@@ -529,7 +529,7 @@ static void send_packet_to_client(GDHCPServer *dhcp_server,
+ 	dhcp_send_raw_packet(dhcp_pkt,
+ 		dhcp_server->server_nip, SERVER_PORT,
+ 		ciaddr, CLIENT_PORT, chaddr,
+-		dhcp_server->ifindex);
++		dhcp_server->ifindex, false);
+ }
+ 
+ static void send_offer(GDHCPServer *dhcp_server,
+@@ -626,7 +626,7 @@ static void send_NAK(GDHCPServer *dhcp_server,
+ 	dhcp_send_raw_packet(&packet,
+ 			dhcp_server->server_nip, SERVER_PORT,
+ 			INADDR_BROADCAST, CLIENT_PORT, MAC_BCAST_ADDR,
+-			dhcp_server->ifindex);
++			dhcp_server->ifindex, false);
+ }
+ 
+ static void send_inform(GDHCPServer *dhcp_server,
+-- 
+1.7.10.4
+
+
