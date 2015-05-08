@@ -1,0 +1,66 @@
+From 0c5558b060f69a7980c910a2e24188b00bb963de Mon Sep 17 00:00:00 2001
+From: fritsch <Peter.Fruehberger@gmail.com>
+Date: Fri, 8 May 2015 10:09:23 +0200
+Subject: [PATCH] dcadec: squash me to 7907932d7294511d9ac846e7b034f831504487e9
+
+---
+ addons/resource.language.en_gb/resources/strings.po          | 4 ++--
+ system/settings/imx6.xml                                     | 8 ++++++++
+ xbmc/cores/dvdplayer/DVDCodecs/Audio/DVDAudioCodecFFmpeg.cpp | 2 ++
+ 3 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/addons/resource.language.en_gb/resources/strings.po b/addons/resource.language.en_gb/resources/strings.po
+index 7cc443c..032a550 100644
+--- a/addons/resource.language.en_gb/resources/strings.po
++++ b/addons/resource.language.en_gb/resources/strings.po
+@@ -16671,10 +16671,10 @@ msgstr ""
+ 
+ #: system/settings/rbp.xml
+ msgctxt "#38120"
+-msgid "Support 8 channel DTS HD audio"
++msgid "Enable 8 channel DTS HD audio (CPU) decoding"
+ msgstr ""
+ 
+ #: system/settings/rbp.xml
+ msgctxt "#38121"
+-msgid "This option supports 8 channel DTS HD but may use more CPU "
++msgid "This option supports 8 channel DTS HD decoding on the CPU. This option is only available when DTS-HD audio decoding is disabled"
+ msgstr ""
+diff --git a/system/settings/imx6.xml b/system/settings/imx6.xml
+index d8b17c3..5c92664 100644
+--- a/system/settings/imx6.xml
++++ b/system/settings/imx6.xml
+@@ -30,6 +30,14 @@
+           </control>
+           <control type="edit" format="integer" />
+         </setting>
++        <setting id="videoplayer.supportdtshd" type="boolean" label="38120" help="38121">
++          <level>2</level>
++          <default>false</default>
++          <control type="toggle" />
++          <dependencies>
++            <dependency type="enable" setting="audiooutput.dtshdpassthrough">false</dependency>
++          </dependencies>
++        </setting>
+       </group>
+     </category>
+   </section>
+diff --git a/xbmc/cores/dvdplayer/DVDCodecs/Audio/DVDAudioCodecFFmpeg.cpp b/xbmc/cores/dvdplayer/DVDCodecs/Audio/DVDAudioCodecFFmpeg.cpp
+index 135bb43..7151192 100644
+--- a/xbmc/cores/dvdplayer/DVDCodecs/Audio/DVDAudioCodecFFmpeg.cpp
++++ b/xbmc/cores/dvdplayer/DVDCodecs/Audio/DVDAudioCodecFFmpeg.cpp
+@@ -58,9 +58,11 @@ bool CDVDAudioCodecFFmpeg::Open(CDVDStreamInfo &hints, CDVDCodecOptions &options
+   AVCodec* pCodec;
+   m_bOpenedCodec = false;
+ 
++#if defined(TARGET_RASPBERRY_PI) || defined(HAS_IMXVPU)
+   if (hints.codec == AV_CODEC_ID_DTS && CSettings::Get().GetBool("videoplayer.supportdtshd"))
+     pCodec = avcodec_find_decoder_by_name("libdcadec");
+   else
++#endif
+     pCodec = avcodec_find_decoder(hints.codec);
+   if (!pCodec)
+   {
+-- 
+2.1.4
+
