@@ -1,0 +1,48 @@
+From 3cc85d9be971d7989b05660a0b0b66a88cb6e0de Mon Sep 17 00:00:00 2001
+From: fritsch <peter.fruehberger@gmail.com>
+Date: Tue, 10 Nov 2015 08:24:34 +0100
+Subject: [PATCH] Scalers: Don't hq process 4k content or when downscaling
+
+---
+ xbmc/cores/VideoRenderers/LinuxRendererGL.cpp | 8 ++++++++
+ xbmc/cores/VideoRenderers/WinRenderer.cpp     | 8 ++++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/xbmc/cores/VideoRenderers/LinuxRendererGL.cpp b/xbmc/cores/VideoRenderers/LinuxRendererGL.cpp
+index 2511b29..3581fec 100644
+--- a/xbmc/cores/VideoRenderers/LinuxRendererGL.cpp
++++ b/xbmc/cores/VideoRenderers/LinuxRendererGL.cpp
+@@ -2862,6 +2862,14 @@ bool CLinuxRendererGL::Supports(ESCALINGMETHOD method)
+     if (scaleX < minScale && scaleY < minScale)
+       return false;
+ 
++    // if we are output > Full HD - lanczos 3 optimized is too slow on 90% of the hw
++    if (m_destRect.Width() > 1920 || m_destRect.Height() > 1080)
++      return false;
++
++    // Also don't use hq scalers when input is 4k
++    if (m_sourceWidth > 1920 || m_sourceHeight > 1080)
++      return false;
++
+     if (g_Windowing.IsExtSupported("GL_EXT_framebuffer_object") && (m_renderMethod & RENDER_GLSL))
+     {
+       // spline36 and lanczos3 are only allowed through advancedsettings.xml
+diff --git a/xbmc/cores/VideoRenderers/WinRenderer.cpp b/xbmc/cores/VideoRenderers/WinRenderer.cpp
+index 26cd6c4..d5ecb54 100644
+--- a/xbmc/cores/VideoRenderers/WinRenderer.cpp
++++ b/xbmc/cores/VideoRenderers/WinRenderer.cpp
+@@ -1307,6 +1307,14 @@ bool CWinRenderer::Supports(ESCALINGMETHOD method)
+         int minScale = CSettings::Get().GetInt("videoplayer.hqscalers");
+         if (scaleX < minScale && scaleY < minScale)
+           return false;
++        // if we are output > Full HD - lanczos 3 optimized is too slow on 90% of the hw
++        if (m_destRect.Width() > 1920 || m_destRect.Height() > 1080)
++          return false;
++
++        // Also don't use hq scalers when input is 4k
++        if (m_sourceWidth > 1920 || m_sourceHeight > 1080)
++          return false;
++
+         return true;
+       }
+     }
