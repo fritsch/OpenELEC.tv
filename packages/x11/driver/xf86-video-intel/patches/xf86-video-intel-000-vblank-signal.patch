@@ -1,0 +1,42 @@
+From 43b08e1ef2ead2b1eea8c9b7971aab49069fa981 Mon Sep 17 00:00:00 2001
+From: Chris Wilson <chris@chris-wilson.co.uk>
+Date: Wed, 2 Dec 2015 10:06:46 +0000
+Subject: [PATCH] sna/dri2: Emit the outstanding signal when eliding a swap
+
+When we do the exchange for the next swap, we should emit any pending
+completion signal for the previous buffer.
+
+Signed-off-by: Chris Wilson <chris@chris-wilson.co.uk>
+---
+ src/sna/sna_dri2.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/src/sna/sna_dri2.c b/src/sna/sna_dri2.c
+index c093024..8b4a78e 100644
+--- a/src/sna/sna_dri2.c
++++ b/src/sna/sna_dri2.c
+@@ -3064,15 +3064,19 @@ sna_dri2_schedule_flip(ClientPtr client, DrawablePtr draw, xf86CrtcPtr crtc,
+ 			sna_dri2_xchg(draw, front, back);
+ 			info->flip_continue = FLIP_COMPLETE;
+ 			info->keepalive = KEEPALIVE;
+-			signal = info->signal;
+-			info->signal = true;
+ 			if (xorg_can_triple_buffer() &&
+ 			    current_msc < *target_msc) {
+ 				DBG(("%s: chaining flip\n", __FUNCTION__));
+ 				info->type = FLIP_THROTTLE;
++				if (info->signal)
++					frame_swap_complete(info, DRI2_EXCHANGE_COMPLETE);
++				info->signal = true;
+ 				goto out;
+-			} else
++			} else {
++				signal = info->signal;
++				info->signal = true;
+ 				goto new_back;
++			}
+ 		}
+ 
+ 		info = sna_dri2_add_event(sna, draw, client, crtc);
+-- 
+2.6.2
