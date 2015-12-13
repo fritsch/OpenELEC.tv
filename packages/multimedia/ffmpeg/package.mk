@@ -17,12 +17,13 @@
 ################################################################################
 
 PKG_NAME="ffmpeg"
-PKG_VERSION="2.8.3"
+PKG_VERSION="2.8.4-Jarvis-rc1-mp3"
 PKG_REV="1"
 PKG_ARCH="any"
 PKG_LICENSE="LGPLv2.1+"
 PKG_SITE="https://ffmpeg.org"
-PKG_URL="https://ffmpeg.org/releases/${PKG_NAME}-${PKG_VERSION}.tar.gz"
+PKG_URL="https://github.com/xbmc/FFmpeg/archive/${PKG_VERSION}.tar.gz"
+PKG_SOURCE_DIR="FFmpeg-${PKG_VERSION}"
 PKG_DEPENDS_TARGET="toolchain yasm:host zlib bzip2 libvorbis libressl dcadec"
 PKG_PRIORITY="optional"
 PKG_SECTION="multimedia"
@@ -162,6 +163,8 @@ configure_target() {
               --enable-encoder=ac3 \
               --enable-encoder=aac \
               --enable-encoder=wmav2 \
+              --enable-encoder=png \
+              --enable-encoder=mjpeg \
               --disable-decoder=mpeg_xvmc \
               --enable-hwaccels \
               --disable-muxers \
@@ -213,4 +216,8 @@ configure_target() {
 
 post_makeinstall_target() {
   rm -rf $INSTALL/usr/share/ffmpeg/examples
+}
+
+unpack() {
+  tar xf $ROOT/$SOURCES/ffmpeg/$PKG_VERSION.tar.gz -C $ROOT/$BUILD
 }
