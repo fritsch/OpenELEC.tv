@@ -1,0 +1,49 @@
+From 147f5b74f110737c0a9c9d466bcb8b6d9b26fef4 Mon Sep 17 00:00:00 2001
+From: arnova <arnova@void.org>
+Date: Thu, 7 Jan 2016 09:37:56 +0100
+Subject: [PATCH] fixed: Music playback from e.g. the library album node was
+ still broken due to an incomplete fix in PR8724
+
+---
+ xbmc/filesystem/DirectoryCache.cpp | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/xbmc/filesystem/DirectoryCache.cpp b/xbmc/filesystem/DirectoryCache.cpp
+index 8b6fcf6..262f2d8 100644
+--- a/xbmc/filesystem/DirectoryCache.cpp
++++ b/xbmc/filesystem/DirectoryCache.cpp
+@@ -167,15 +167,14 @@ void CDirectoryCache::AddFile(const std::string& strFile)
+   CSingleLock lock (m_cs);
+ 
+   // Get rid of any URL options, else the compare may be wrong
+-  std::string strFile2 = CURL(strFile).GetWithoutOptions();
+-  std::string strPath = URIUtils::GetDirectory(strFile2);
++  std::string strPath = URIUtils::GetDirectory(CURL(strFile).GetWithoutOptions());
+   URIUtils::RemoveSlashAtEnd(strPath);
+ 
+   ciCache i = m_cache.find(strPath);
+   if (i != m_cache.end())
+   {
+     CDir *dir = i->second;
+-    CFileItemPtr item(new CFileItem(strFile2, false));
++    CFileItemPtr item(new CFileItem(strFile, false));
+     dir->m_Items->Add(item);
+     dir->SetLastAccess(m_accessCounter);
+   }
+@@ -202,7 +201,15 @@ bool CDirectoryCache::FileExists(const std::string& strFile, bool& bInCache)
+ #ifdef _DEBUG
+     m_cacheHits++;
+ #endif
+-    return (URIUtils::PathEquals(strPath, storedPath) || dir->m_Items->Contains(strFile2));
++    if (URIUtils::PathEquals(strPath, storedPath))
++      return true;
++
++    // Look for file in this directory but strip off url options
++    for (int i = 0; i < dir->m_Items->Size(); i++)
++    {
++      if (strFile2 == CURL(dir->m_Items->Get(i)->GetPath()).GetWithoutOptions());
++        return true;
++    }
+   }
+ #ifdef _DEBUG
+   m_cacheMisses++;
