@@ -1,15 +1,75 @@
-From 147f5b74f110737c0a9c9d466bcb8b6d9b26fef4 Mon Sep 17 00:00:00 2001
+From c7c41f19b2f04d070d1396ede103e44a99ec96e5 Mon Sep 17 00:00:00 2001
 From: arnova <arnova@void.org>
 Date: Thu, 7 Jan 2016 09:37:56 +0100
 Subject: [PATCH] fixed: Music playback from e.g. the library album node was
- still broken due to an incomplete fix in PR8724
+ broken due to an incomplete fix in PR8724
 
 ---
- xbmc/filesystem/DirectoryCache.cpp | 15 +++++++++++----
- 1 file changed, 11 insertions(+), 4 deletions(-)
+ xbmc/FileItem.cpp                  |  8 ++++----
+ xbmc/FileItem.h                    |  4 ++--
+ xbmc/filesystem/DirectoryCache.cpp | 10 ++++------
+ xbmc/utils/URIUtils.cpp            | 16 +++++++++++++---
+ xbmc/utils/URIUtils.h              |  2 +-
+ 5 files changed, 24 insertions(+), 16 deletions(-)
 
+diff --git a/xbmc/FileItem.cpp b/xbmc/FileItem.cpp
+index 0d96cc6..17ef09b 100644
+--- a/xbmc/FileItem.cpp
++++ b/xbmc/FileItem.cpp
+@@ -1537,9 +1537,9 @@ bool CFileItem::IsURL(const CURL& url) const
+   return IsPath(url.Get());
+ }
+ 
+-bool CFileItem::IsPath(const std::string& path) const
++bool CFileItem::IsPath(const std::string& path, bool ignoreURLOptions /* = false */) const
+ {
+-  return URIUtils::PathEquals(m_strPath, path);
++  return URIUtils::PathEquals(m_strPath, path, false, ignoreURLOptions);
+ }
+ 
+ void CFileItem::SetCueDocument(const CCueDocumentPtr& cuePtr)
+@@ -1705,7 +1705,7 @@ void CFileItemList::SetFastLookup(bool fastLookup)
+   m_fastLookup = fastLookup;
+ }
+ 
+-bool CFileItemList::Contains(const std::string& fileName) const
++bool CFileItemList::Contains(const std::string& fileName, bool ignoreURLOptions /* = false */) const
+ {
+   CSingleLock lock(m_lock);
+ 
+@@ -1716,7 +1716,7 @@ bool CFileItemList::Contains(const std::string& fileName) const
+   for (unsigned int i = 0; i < m_items.size(); i++)
+   {
+     const CFileItemPtr pItem = m_items[i];
+-    if (pItem->IsPath(fileName))
++    if (pItem->IsPath(fileName, ignoreURLOptions))
+       return true;
+   }
+   return false;
+diff --git a/xbmc/FileItem.h b/xbmc/FileItem.h
+index 293f979..2cf3dcf 100644
+--- a/xbmc/FileItem.h
++++ b/xbmc/FileItem.h
+@@ -126,7 +126,7 @@ class CFileItem :
+   bool IsURL(const CURL& url) const;
+   const std::string &GetPath() const { return m_strPath; };
+   void SetPath(const std::string &path) { m_strPath = path; };
+-  bool IsPath(const std::string& path) const;
++  bool IsPath(const std::string& path, bool ignoreURLOptions = false) const;
+ 
+   /*! \brief reset class to it's default values as per construction.
+    Free's all allocated memory.
+@@ -626,7 +626,7 @@ class CFileItemList : public CFileItem
+   void FilterCueItems();
+   void RemoveExtensions();
+   void SetFastLookup(bool fastLookup);
+-  bool Contains(const std::string& fileName) const;
++  bool Contains(const std::string& fileName, bool ignoreURLOptions = false) const;
+   bool GetFastLookup() const { return m_fastLookup; };
+ 
+   /*! \brief stack a CFileItemList
 diff --git a/xbmc/filesystem/DirectoryCache.cpp b/xbmc/filesystem/DirectoryCache.cpp
-index 8b6fcf6..262f2d8 100644
+index 8b6fcf6..1f8a1aa 100644
 --- a/xbmc/filesystem/DirectoryCache.cpp
 +++ b/xbmc/filesystem/DirectoryCache.cpp
 @@ -167,15 +167,14 @@ void CDirectoryCache::AddFile(const std::string& strFile)
@@ -30,20 +90,63 @@ index 8b6fcf6..262f2d8 100644
      dir->m_Items->Add(item);
      dir->SetLastAccess(m_accessCounter);
    }
-@@ -202,7 +201,15 @@ bool CDirectoryCache::FileExists(const std::string& strFile, bool& bInCache)
+@@ -187,8 +186,7 @@ bool CDirectoryCache::FileExists(const std::string& strFile, bool& bInCache)
+   bInCache = false;
+ 
+   // Get rid of any URL options, else the compare may be wrong
+-  std::string strFile2 = CURL(strFile).GetWithoutOptions();
+-  std::string strPath(strFile2);
++  std::string strPath = CURL(strFile).GetWithoutOptions();
+   URIUtils::RemoveSlashAtEnd(strPath);
+   std::string storedPath = URIUtils::GetDirectory(strPath);
+   URIUtils::RemoveSlashAtEnd(storedPath);
+@@ -202,7 +200,7 @@ bool CDirectoryCache::FileExists(const std::string& strFile, bool& bInCache)
  #ifdef _DEBUG
      m_cacheHits++;
  #endif
 -    return (URIUtils::PathEquals(strPath, storedPath) || dir->m_Items->Contains(strFile2));
-+    if (URIUtils::PathEquals(strPath, storedPath))
-+      return true;
-+
-+    // Look for file in this directory but strip off url options
-+    for (int i = 0; i < dir->m_Items->Size(); i++)
-+    {
-+      if (strFile2 == CURL(dir->m_Items->Get(i)->GetPath()).GetWithoutOptions());
-+        return true;
-+    }
++    return (URIUtils::PathEquals(strPath, storedPath) || dir->m_Items->Contains(strFile, true));
    }
  #ifdef _DEBUG
    m_cacheMisses++;
+diff --git a/xbmc/utils/URIUtils.cpp b/xbmc/utils/URIUtils.cpp
+index 7dd87c1..a111c1f 100644
+--- a/xbmc/utils/URIUtils.cpp
++++ b/xbmc/utils/URIUtils.cpp
+@@ -522,10 +522,20 @@ bool URIUtils::PathStarts(const std::string& url, const char *start)
+   return StringUtils::StartsWith(url, start);
+ }
+ 
+-bool URIUtils::PathEquals(const std::string& url, const std::string &start, bool ignoreTrailingSlash /* = false */)
++bool URIUtils::PathEquals(const std::string& url, const std::string &start, bool ignoreTrailingSlash /* = false */, bool ignoreURLOptions /* = false */)
+ {
+-  std::string path1 = url;
+-  std::string path2 = start;
++  std::string path1, path2;
++  if (ignoreURLOptions)
++  {
++    path1 = CURL(url).GetWithoutOptions();
++    path2 = CURL(start).GetWithoutOptions();
++  }
++  else
++  {
++    path1 = url;
++    path2 = start;
++  }
++
+   if (ignoreTrailingSlash)
+   {
+     RemoveSlashAtEnd(path1);
+diff --git a/xbmc/utils/URIUtils.h b/xbmc/utils/URIUtils.h
+index 483af5f..874d5ec 100644
+--- a/xbmc/utils/URIUtils.h
++++ b/xbmc/utils/URIUtils.h
+@@ -117,7 +117,7 @@ class URIUtils
+    \return true if the paths are equal, false otherwise.
+    \sa IsProtocol, PathStarts
+    */
+-  static bool PathEquals(const std::string& path1, const std::string &path2, bool ignoreTrailingSlash = false);
++  static bool PathEquals(const std::string& path1, const std::string &path2, bool ignoreTrailingSlash = false, bool ignoreURLOptions = false);
+ 
+   static bool IsAddonsPath(const std::string& strFile);
+   static bool IsSourcesPath(const std::string& strFile);
