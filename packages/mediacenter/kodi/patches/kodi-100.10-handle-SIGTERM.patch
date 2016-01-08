@@ -19,7 +19,7 @@ so, when shutdown/reboot is requested:
  xbmc/Application.h       |  1 +
  xbmc/XBApplicationEx.cpp |  1 +
  xbmc/XBApplicationEx.h   |  1 +
- xbmc/main/main.cpp       | 15 +++++++++++++++
+ xbmc/platform/posix/main.cpp       | 15 +++++++++++++++
  5 files changed, 30 insertions(+), 5 deletions(-)
 
 diff --git a/xbmc/Application.cpp b/xbmc/Application.cpp
@@ -121,14 +121,14 @@ index c46cba1..ed3f35f 100644
    bool m_AppFocused;
    bool m_renderGUI;
  
-diff --git a/xbmc/main/main.cpp b/xbmc/main/main.cpp
+diff --git a/xbmc/platform/posix/main.cpp b/xbmc/platform/posix/main.cpp
 index 01027f8..4cfb04e 100644
---- a/xbmc/main/main.cpp
-+++ b/xbmc/main/main.cpp
+--- a/xbmc/platform/posix/main.cpp
++++ b/xbmc/platform/posix/main.cpp
 @@ -41,12 +41,27 @@
  #include "input/linux/LIRC.h"
  #endif
- #include "XbmcContext.h"
+ #include "platform/XbmcContext.h"
 +#include "Application.h"
 +
 +void xbmc_term_handler(int signum)
