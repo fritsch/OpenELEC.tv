@@ -1,0 +1,25 @@
+From 83b910b2fea9e9fbf28a1ec600ba3a8bf019ade8 Mon Sep 17 00:00:00 2001
+From: fritsch <Peter.Fruehberger@gmail.com>
+Date: Fri, 25 Dec 2015 21:12:47 +0100
+Subject: [PATCH] NoOfBuffers: Use 2 on OE - as we ship TripleBuffers disabled
+
+---
+ system/settings/settings.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/system/settings/settings.xml b/system/settings/settings.xml
+index 87fb837..5e202f2 100644
+--- a/system/settings/settings.xml
++++ b/system/settings/settings.xml
+@@ -2438,7 +2438,7 @@
+         </setting>
+         <setting id="videoscreen.noofbuffers" type="integer" label="36043" help="36552">
+           <level>2</level>
+-          <default>3</default> <!-- triple buffers -->
++          <default>2</default> <!-- double buffers -->
+           <constraints>
+             <minimum>2</minimum>
+             <step>1</step>
+-- 
+2.5.0
+
