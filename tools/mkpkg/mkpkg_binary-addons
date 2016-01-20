@@ -111,8 +111,8 @@ if [ -f ../../packages/mediacenter/platform/package.mk ] ; then
 fi
 
 # p8-platform
-REPO=$(cat $KODI_DIR/project/cmake/addons/depends/common/platform/platform.txt | awk '{print $2}')
-GIT_HASH=$(cat $KODI_DIR/project/cmake/addons/depends/common/platform/platform.txt | awk '{print $3}')
+REPO=$(cat $KODI_DIR/project/cmake/addons/depends/common/p8-platform/p8-platform.txt | awk '{print $2}')
+GIT_HASH=$(cat $KODI_DIR/project/cmake/addons/depends/common/p8-platform/p8-platform.txt | awk '{print $3}')
 
 copy_and_package $REPO platform $GIT_HASH
 
