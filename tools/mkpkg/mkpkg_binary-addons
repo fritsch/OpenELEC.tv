@@ -97,7 +97,6 @@ if [ ! -d $KODI_DIR ] ; then
   exit 127
 fi
 
-<<<<<<< HEAD
 # platform
 REPO=$(cat $KODI_DIR/project/cmake/addons/depends/common/platform/platform.txt | awk '{print $2}')
 GIT_HASH=$(cat $KODI_DIR/project/cmake/addons/depends/common/platform/platform.txt | awk '{print $3}')
