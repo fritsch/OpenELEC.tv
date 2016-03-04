@@ -17,7 +17,7 @@
 ################################################################################
 
 PKG_NAME="xf86-video-intel"
-PKG_VERSION="8b8c9a36"
+PKG_VERSION="d167280"
 PKG_REV="1"
 PKG_ARCH="x86_64"
 PKG_LICENSE="OSS"
