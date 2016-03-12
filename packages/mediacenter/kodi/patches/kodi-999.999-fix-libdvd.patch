@@ -1,27 +1,27 @@
-From ad5f00c34e26c3b5c7102db9ee1951af3e9bab62 Mon Sep 17 00:00:00 2001
+From 0495cf54b9f852d7ab2e38ab54db57c58032ea52 Mon Sep 17 00:00:00 2001
 From: fritsch <peter.fruehberger@gmail.com>
-Date: Sat, 27 Feb 2016 07:35:28 +0100
-Subject: [PATCH] Workaround libdvd (thx milhouse)
+Date: Sat, 12 Mar 2016 18:31:26 +0100
+Subject: [PATCH] squash
 
 ---
  Makefile.in | 2 --
  1 file changed, 2 deletions(-)
 
 diff --git a/Makefile.in b/Makefile.in
-index 8a06e6f..fa1fc03 100644
+index 4b805e0..9a2b212 100644
 --- a/Makefile.in
 +++ b/Makefile.in
 @@ -11,7 +11,6 @@ EC_DIRS= \
  
  DVDPCODECS_DIRS= \
  	lib \
--	lib/libdvd 
+-	lib/libdvd
  
  VideoPlayer_ARCHIVES=xbmc/cores/VideoPlayer/VideoPlayer.a \
                     xbmc/cores/VideoPlayer/DVDCodecs/DVDCodecs.a \
-@@ -321,7 +320,6 @@ libaddon: exports
- 	$(MAKE) -C lib/addons/library.kodi.guilib
+@@ -339,7 +338,6 @@ libaddon: exports
  	$(MAKE) -C lib/addons/library.xbmc.pvr
+ 	$(MAKE) -C lib/addons/library.kodi.inputstream
  dvdpcodecs: dllloader
 -	$(MAKE) -C lib/libdvd
  
