@@ -47,5 +47,5 @@ if [ "$MEDIACENTER" = "kodi" ]; then
   if [ "$KODI_LANGUAGE_ADDONS" = "yes" ]; then
     PKG_DEPENDS_TARGET="$PKG_DEPENDS_TARGET kodi-language-addons"
   fi
-  PKG_DEPENDS_TARGET="$PKG_DEPENDS_TARGET pvr.demo pvr.filmon pvr.hts pvr.iptvsimple pvr.mythtv pvr.nextpvr pvr.njoy pvr.pctv pvr.stalker pvr.vdr.vnsi pvr.wmc pvr.mediaportal.tvserver pvr.dvblink visualization.fishbmc visualization.projectm visualization.spectrum visualization.waveform"
+  PKG_DEPENDS_TARGET="$PKG_DEPENDS_TARGET pvr.demo pvr.filmon pvr.hts pvr.iptvsimple pvr.mythtv pvr.nextpvr pvr.njoy pvr.pctv pvr.stalker pvr.vdr.vnsi pvr.wmc pvr.mediaportal.tvserver pvr.dvblink visualization.fishbmc visualization.projectm visualization.spectrum visualization.waveform inputstream.mpd"
 fi
