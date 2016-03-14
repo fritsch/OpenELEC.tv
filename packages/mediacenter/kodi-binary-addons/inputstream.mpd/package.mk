@@ -46,6 +46,9 @@ post_makeinstall_target() {
   mkdir -p $INSTALL/usr/lib/kodi/addons/$PKG_NAME/decrypter
   cp -P $ROOT/$PKG_BUILD/.$TARGET_NAME/wv/libssd_wv.so $INSTALL/usr/lib/kodi/addons/$PKG_NAME/decrypter/
   cp -P $ROOT/$PKG_BUILD/*widevine*so $INSTALL/usr/lib/kodi/addons/$PKG_NAME/decrypter/
+  # this is a workaround
+  cp -PR $INSTALL/usr/lib/kodi/addons/$PKG_NAME/* $INSTALL/usr/share/kodi/addons/$PKG_NAME/
+
 }
 
 addon() {
