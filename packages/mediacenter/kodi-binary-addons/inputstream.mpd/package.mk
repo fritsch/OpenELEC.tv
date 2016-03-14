@@ -17,7 +17,7 @@
 ################################################################################
 
 PKG_NAME="inputstream.mpd"
-PKG_VERSION="95c9bcf-widevine"
+PKG_VERSION="70751578-widevine"
 PKG_LICENSE="GPL"
 PKG_SITE="http://www.kodi.tv"
 PKG_URL="http://fritsch.fruehberger.net/sources/$PKG_NAME-$PKG_VERSION.tar.xz"
@@ -45,7 +45,6 @@ post_makeinstall_target() {
   make
   mkdir -p $INSTALL/usr/lib/kodi/addons/$PKG_NAME/decrypter
   cp -P $ROOT/$PKG_BUILD/.$TARGET_NAME/wv/libssd_wv.so $INSTALL/usr/lib/kodi/addons/$PKG_NAME/decrypter/
-  cp -P $ROOT/$PKG_BUILD/.$TARGET_NAME/wv/libssd_wv.so $INSTALL/usr/lib/kodi/addons/$PKG_NAME/decrypter/ssd_wv.so
   cp -P $ROOT/$PKG_BUILD/*widevine*so $INSTALL/usr/lib/kodi/addons/$PKG_NAME/decrypter/
   # this is a workaround
   cp -PR $INSTALL/usr/lib/kodi/addons/$PKG_NAME/* $INSTALL/usr/share/kodi/addons/$PKG_NAME/
@@ -57,8 +56,6 @@ addon() {
   cp -PL $PKG_BUILD/.install_pkg/usr/lib/kodi/addons/$PKG_NAME/*.so $ADDON_BUILD/$PKG_ADDON_ID/
   mkdir -p $ADDON_BUILD/$PKG_ADDON_ID/decrypter/
   cp -P $PKG_BUILD/.$TARGET_NAME/wv/libssd_wv.so $ADDON_BUILD/$PKG_ADDON_ID/decrypter/
-  # not so sure here
-  cp -P $PKG_BUILD/.$TARGET_NAME/wv/libssd_wv.so $ADDON_BUILD/$PKG_ADDON_ID/decrypter/ssd_wv.so
   cp -P $ROOT/$PKG_BUILD/*widevine*so $ADDON_BUILD/$PKG_ADDON_ID/decrypter/
 }
 
