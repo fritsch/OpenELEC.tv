@@ -17,7 +17,7 @@
 ################################################################################
 
 PKG_NAME="inputstream.mpd"
-PKG_VERSION="d640803-widevine2"
+PKG_VERSION="80a1d43-widevine"
 PKG_LICENSE="GPL"
 PKG_SITE="http://www.kodi.tv"
 PKG_URL="http://fritsch.fruehberger.net/sources/$PKG_NAME-$PKG_VERSION.tar.xz"
