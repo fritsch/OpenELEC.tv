@@ -1,0 +1,25 @@
+From 4995309cc74c107a7c09bce08a8e49bc2360dd0e Mon Sep 17 00:00:00 2001
+From: fritsch <peter.fruehberger@gmail.com>
+Date: Fri, 1 Apr 2016 22:41:04 +0200
+Subject: [PATCH] kodi: don't go windowed
+
+---
+ xbmc/windowing/WinSystem.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/xbmc/windowing/WinSystem.h b/xbmc/windowing/WinSystem.h
+index b922156..a4fd1ff 100644
+--- a/xbmc/windowing/WinSystem.h
++++ b/xbmc/windowing/WinSystem.h
+@@ -96,7 +96,7 @@ public:
+   unsigned int GetHeight() { return m_nHeight; }
+   virtual int GetNumScreens() { return 0; }
+   virtual int GetCurrentScreen() { return 0; }
+-  virtual bool CanDoWindowed() { return true; }
++  virtual bool CanDoWindowed() { return false; }
+   bool IsFullScreen() { return m_bFullScreen; }
+   virtual void UpdateResolutions();
+   void SetWindowResolution(int width, int height);
+-- 
+2.5.0
+
